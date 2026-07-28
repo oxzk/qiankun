@@ -1,0 +1,24 @@
+# 文件编码: UTF-8 无 BOM
+.git
+.github
+__pycache__/
+*.py[cod]
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
+coverage/
+htmlcov/
+data/
+*.db
+*.sqlite
+*.sqlite3
+src/node_modules/
+src/dist/
+src/tsconfig.*.tsbuildinfo
