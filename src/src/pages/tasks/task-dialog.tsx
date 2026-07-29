@@ -1,4 +1,6 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Controller, useForm, type Resolver } from "react-hook-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Field } from "@/components/common";
 import { Button } from "@/components/ui/button";
@@ -14,9 +16,11 @@ import { useToast } from "@/hooks/use-toast";
 import { getErrorMessage, notificationsApi, providersApi } from "@/lib/api";
 import { getNextCronRuns } from "@/lib/cron";
 import { formatDateTime } from "@/lib/datetime";
-import { formatJson, parseJsonObject, tryParseJsonObject } from "@/lib/json-schema";
+import { taskFormSchema, toTaskPayload, type TaskFormValues } from "@/lib/forms";
+import { formatJson } from "@/lib/json-schema";
+import { queryStaleTime } from "@/lib/query-options";
 import { queryKeys } from "@/lib/query-keys";
-import type { EnumMap, JsonRecord, NotifyStrategy, Task, TaskPayload } from "@/types";
+import type { EnumMap, NotifyStrategy, Task, TaskPayload } from "@/types";
 import { defaultTaskPayload, getNotifyStrategyOptions, toTaskDialogPayload } from "./task-utils";
 
 export interface TaskDialogProps {
@@ -47,41 +51,61 @@ export interface TaskDialogProps {
 }
 
 /**
+ * 构建任务表单默认值。
+ */
+function toFormValues(task: Task | null): TaskFormValues {
+  const payload = toTaskDialogPayload(task) ?? defaultTaskPayload;
+  return {
+    name: payload.name,
+    provider_name: payload.provider_name,
+    provider_config_text: formatJson(payload.provider_config || {}),
+    cron_expression: payload.cron_expression,
+    enabled: payload.enabled,
+    timeout_seconds: payload.timeout_seconds,
+    retry_count: payload.retry_count,
+    retry_interval: payload.retry_interval,
+    notification_ids: payload.notification_ids || [],
+    notify_strategy: payload.notify_strategy,
+  };
+}
+
+/**
  * 任务编辑弹窗。
  */
 export function TaskDialog({ open, task, loading, enums, onOpenChange, onSubmit }: TaskDialogProps): JSX.Element {
-  const [payload, setPayload] = useState<TaskPayload>(defaultTaskPayload);
-  const [providerConfigText, setProviderConfigText] = useState(formatJson({}));
-  const [providerError, setProviderError] = useState(false);
   const { toast } = useToast();
+  const form = useForm<TaskFormValues>({
+    resolver: zodResolver(taskFormSchema) as Resolver<TaskFormValues>,
+    defaultValues: toFormValues(task),
+    mode: "onChange",
+  });
+
+  const providerName = form.watch("provider_name");
+  const cronExpression = form.watch("cron_expression");
+  const notifyStrategy = form.watch("notify_strategy");
+  const providerConfigText = form.watch("provider_config_text");
+  const debouncedCron = useDebouncedValue(cronExpression, 300);
   const debouncedConfigText = useDebouncedValue(providerConfigText, 300);
-  const debouncedCron = useDebouncedValue(payload.cron_expression, 300);
 
   const providersQuery = useQuery({
-    queryKey: queryKeys.providers.root,
-    queryFn: () => providersApi.list({ page: 1, page_size: 500, enabled: true }),
+    queryKey: queryKeys.providers.options,
+    queryFn: ({ signal }) => providersApi.list({ page: 1, page_size: 500, enabled: true }, signal),
     enabled: open,
-    staleTime: 60_000,
+    staleTime: queryStaleTime.catalog,
   });
 
   const notificationsQuery = useQuery({
-    queryKey: queryKeys.notifications.root,
-    queryFn: () => notificationsApi.list({ page: 1, page_size: 500 }),
+    queryKey: queryKeys.notifications.options,
+    queryFn: ({ signal }) => notificationsApi.list({ page: 1, page_size: 500 }, signal),
     enabled: open,
-    staleTime: 60_000,
+    staleTime: queryStaleTime.catalog,
   });
 
   const configMutation = useMutation({
-    mutationFn: (providerName: string) => providersApi.config(providerName),
-    onSuccess: (config, providerName) => {
-      setPayload((current) => {
-        if (current.provider_name !== providerName) return current;
-        setProviderConfigText(formatJson(config));
-        return {
-          ...current,
-          provider_config: config,
-        };
-      });
+    mutationFn: (name: string) => providersApi.config(name),
+    onSuccess: (config, name) => {
+      if (form.getValues("provider_name") !== name) return;
+      form.setValue("provider_config_text", formatJson(config), { shouldValidate: true });
     },
     onError: (error) => {
       toast({
@@ -113,69 +137,33 @@ export function TaskDialog({ open, task, loading, enums, onOpenChange, onSubmit 
   );
 
   const notifyStrategyOptions = useMemo(() => getNotifyStrategyOptions(enums), [enums]);
-
-  const configParseError = useMemo(() => tryParseJsonObject(debouncedConfigText).error, [debouncedConfigText]);
-
   const nextCronRuns = useMemo(() => getNextCronRuns(debouncedCron, 5), [debouncedCron]);
+  const configError = form.formState.errors.provider_config_text?.message;
 
   useEffect(() => {
-    if (open) {
-      const nextPayload = toTaskDialogPayload(task);
-      setPayload(nextPayload);
-      setProviderConfigText(formatJson(nextPayload.provider_config || {}));
-      setProviderError(false);
-    }
-  }, [task, open]);
+    if (!open) return;
+    form.reset(toFormValues(task));
+  }, [form, open, task]);
+
+  useEffect(() => {
+    if (!open) return;
+    void form.trigger("provider_config_text");
+  }, [debouncedConfigText, form, open]);
 
   /**
    * 切换执行器并拉取默认配置。
    */
   function handleProviderChange(name: string): void {
-    setProviderError(false);
-    const nextConfig = {};
-    setPayload({
-      ...payload,
-      provider_name: name,
-      provider_config: nextConfig,
-    });
-    setProviderConfigText(formatJson(nextConfig));
+    form.setValue("provider_name", name, { shouldValidate: true, shouldDirty: true });
+    form.setValue("provider_config_text", formatJson({}), { shouldValidate: true });
     if (name) configMutation.mutate(name);
   }
 
   /**
    * 提交任务表单。
    */
-  function submit(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    if (!payload.provider_name) {
-      setProviderError(true);
-      return;
-    }
-    let providerConfig: JsonRecord;
-    try {
-      providerConfig = parseJsonObject(providerConfigText);
-    } catch (error) {
-      toast({
-        title: "JSON 格式错误",
-        description: error instanceof Error ? error.message : "请输入有效的 JSON 对象格式。",
-        variant: "destructive",
-      });
-      return;
-    }
-    onSubmit({
-      ...payload,
-      provider_config: providerConfig,
-      notification_ids: payload.notification_ids || [],
-    });
-  }
-
-  /**
-   * 原生必填校验拦截提交时同步显示执行器错误。
-   */
-  function handleInvalid(): void {
-    if (!payload.provider_name) {
-      setProviderError(true);
-    }
+  function submit(values: TaskFormValues): void {
+    onSubmit(toTaskPayload(values));
   }
 
   return (
@@ -184,17 +172,18 @@ export function TaskDialog({ open, task, loading, enums, onOpenChange, onSubmit 
         <DialogHeader>
           <DialogTitle>{task ? "编辑任务" : "新建任务"}</DialogTitle>
         </DialogHeader>
-        <form className="grid gap-7" onSubmit={submit} onInvalidCapture={handleInvalid}>
+        <form className="grid gap-7" onSubmit={form.handleSubmit(submit)}>
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label="任务名称" required>
-              <Input value={payload.name} onChange={(event) => setPayload({ ...payload, name: event.target.value })} required />
+            <Field label="任务名称" required error={Boolean(form.formState.errors.name)} errorMessage={form.formState.errors.name?.message}>
+              <Input {...form.register("name")} required />
             </Field>
-            <Field label="Cron 表达式" required>
-              <Input
-                value={payload.cron_expression}
-                onChange={(event) => setPayload({ ...payload, cron_expression: event.target.value })}
-                required
-              />
+            <Field
+              label="Cron 表达式"
+              required
+              error={Boolean(form.formState.errors.cron_expression)}
+              errorMessage={form.formState.errors.cron_expression?.message}
+            >
+              <Input {...form.register("cron_expression")} required />
             </Field>
           </div>
 
@@ -211,12 +200,17 @@ export function TaskDialog({ open, task, loading, enums, onOpenChange, onSubmit 
             )}
           </div>
 
-          <Field label="选择执行器" required error={providerError}>
+          <Field
+            label="选择执行器"
+            required
+            error={Boolean(form.formState.errors.provider_name)}
+            errorMessage={form.formState.errors.provider_name?.message}
+          >
             {providersQuery.isLoading ? (
               <Skeleton className="h-10 w-full" />
             ) : (
               <Select
-                value={payload.provider_name}
+                value={providerName}
                 onValueChange={handleProviderChange}
                 options={providerOptions}
                 placeholder="请选择"
@@ -225,48 +219,32 @@ export function TaskDialog({ open, task, loading, enums, onOpenChange, onSubmit 
           </Field>
 
           <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
-            <Field label="超时秒数" required>
-              <Input
-                type="number"
-                min={1}
-                max={86400}
-                value={payload.timeout_seconds}
-                onChange={(event) => setPayload({ ...payload, timeout_seconds: Number(event.target.value) })}
-                required
-              />
+            <Field label="超时秒数" required error={Boolean(form.formState.errors.timeout_seconds)}>
+              <Input type="number" min={1} max={86400} {...form.register("timeout_seconds", { valueAsNumber: true })} required />
             </Field>
-            <Field label="重试次数" required>
-              <Input
-                type="number"
-                min={0}
-                max={10}
-                value={payload.retry_count}
-                onChange={(event) => setPayload({ ...payload, retry_count: Number(event.target.value) })}
-                required
-              />
+            <Field label="重试次数" required error={Boolean(form.formState.errors.retry_count)}>
+              <Input type="number" min={0} max={10} {...form.register("retry_count", { valueAsNumber: true })} required />
             </Field>
-            <Field label="重试间隔 (秒)" required>
-              <Input
-                type="number"
-                min={1}
-                max={86400}
-                value={payload.retry_interval}
-                onChange={(event) => setPayload({ ...payload, retry_interval: Number(event.target.value) })}
-                required
-              />
+            <Field label="重试间隔 (秒)" required error={Boolean(form.formState.errors.retry_interval)}>
+              <Input type="number" min={1} max={86400} {...form.register("retry_interval", { valueAsNumber: true })} required />
             </Field>
             <div className="grid justify-self-end gap-1.5">
               <span className="field-label whitespace-nowrap">状态</span>
               <div className="flex h-9 items-center justify-end">
-                <Switch checked={payload.enabled} onCheckedChange={(checked) => setPayload({ ...payload, enabled: checked })} />
+                <Controller
+                  control={form.control}
+                  name="enabled"
+                  render={({ field }) => (
+                    <Switch checked={field.value} onCheckedChange={field.onChange} />
+                  )}
+                />
               </div>
             </div>
           </div>
 
-          <Field label="执行器配置 (JSON)" error={Boolean(configParseError)} errorMessage={configParseError || undefined}>
+          <Field label="执行器配置 (JSON)" error={Boolean(configError)} errorMessage={configError}>
             <Textarea
-              value={providerConfigText}
-              onChange={(event) => setProviderConfigText(event.target.value)}
+              {...form.register("provider_config_text")}
               placeholder={`例如:\n{\n  "message": "hello"\n}`}
               rows={7}
               className="font-mono text-xs"
@@ -278,41 +256,52 @@ export function TaskDialog({ open, task, loading, enums, onOpenChange, onSubmit 
             <legend className="-ml-1 px-1 text-sm font-semibold text-muted-foreground">通知关联</legend>
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="通知策略" required>
-                <Select
-                  value={payload.notify_strategy}
-                  onValueChange={(value) => {
-                    const strategy = value as NotifyStrategy;
-                    setPayload({
-                      ...payload,
-                      notify_strategy: strategy,
-                      notification_ids: strategy === "never" ? [] : payload.notification_ids,
-                    });
-                  }}
-                  options={notifyStrategyOptions}
+                <Controller
+                  control={form.control}
+                  name="notify_strategy"
+                  render={({ field }) => (
+                    <Select
+                      value={field.value}
+                      onValueChange={(value) => {
+                        const strategy = value as NotifyStrategy;
+                        field.onChange(strategy);
+                        if (strategy === "never") {
+                          form.setValue("notification_ids", []);
+                        }
+                      }}
+                      options={notifyStrategyOptions}
+                    />
+                  )}
                 />
               </Field>
               <Field label="通知渠道">
                 {notificationsQuery.isLoading ? (
                   <Skeleton className="h-10 w-full" />
-                ) : payload.notify_strategy === "never" ? (
+                ) : notifyStrategy === "never" ? (
                   <div className="flex h-10 items-center text-xs text-muted-foreground italic">不发送任何通知</div>
                 ) : (
-                  <CheckboxGroup
-                    options={notificationOptions}
-                    value={payload.notification_ids}
-                    onChange={(value) => setPayload({ ...payload, notification_ids: value as number[] })}
-                    className="min-h-10"
-                    orientation="horizontal"
+                  <Controller
+                    control={form.control}
+                    name="notification_ids"
+                    render={({ field }) => (
+                      <CheckboxGroup
+                        options={notificationOptions}
+                        value={field.value}
+                        onChange={(value) => field.onChange(value as number[])}
+                        className="min-h-10"
+                        orientation="horizontal"
+                      />
+                    )}
                   />
                 )}
               </Field>
             </div>
           </fieldset>
-          <div className="flex justify-end gap-2 mt-4">
+          <div className="mt-4 flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               取消
             </Button>
-            <Button type="submit" loading={loading} disabled={Boolean(configParseError)}>
+            <Button type="submit" loading={loading} disabled={Boolean(configError)}>
               保存
             </Button>
           </div>

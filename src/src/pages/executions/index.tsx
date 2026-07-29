@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, Search } from "lucide-react";
-import { EmptyState, SectionHeader, TooltipIconButton } from "@/components/common";
+import { CodeBlock, EmptyState, FilterBar, SectionHeader, TooltipIconButton } from "@/components/common";
 import { DataTableShell } from "@/components/data/data-table-shell";
 import { PaginationBar } from "@/components/data/pagination-bar";
 import { TableEmptyState } from "@/components/data/table-empty-state";
+import { TableSkeleton } from "@/components/data/table-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -12,13 +13,36 @@ import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { usePagination } from "@/hooks/use-pagination";
-import { useUrlStringParam } from "@/hooks/use-url-state";
-import { getErrorMessage, executionsApi } from "@/lib/api";
+import { useUrlParamsWriter, useUrlStringParam } from "@/hooks/use-url-state";
+import { executionsApi, getErrorMessage } from "@/lib/api";
+import { formatDateTime, formatDurationMs } from "@/lib/datetime";
 import { enumOptions } from "@/lib/enums";
+import { formatJson } from "@/lib/json-schema";
+import { queryStaleTime, RUNNING_POLL_INTERVAL_MS } from "@/lib/query-options";
 import { queryKeys } from "@/lib/query-keys";
-import { formatDateTime, formatDuration } from "@/lib/datetime";
 import { executionStatusLabel, executionStatusVariant, triggerTypeLabel } from "@/pages/executions/status";
 import type { ExecutionStatus } from "@/types";
+
+const EXECUTION_SKELETON_COLUMNS = [
+  { widthClass: "w-12" },
+  { widthClass: "w-36" },
+  { widthClass: "w-24" },
+  { widthClass: "w-16" },
+  { widthClass: "w-12" },
+  { widthClass: "w-40" },
+  { widthClass: "w-40" },
+  { widthClass: "w-16" },
+  { widthClass: "w-8", align: "right" as const },
+];
+
+/**
+ * 解析任务 ID 筛选, 非法值返回空。
+ */
+function parseTaskIdFilter(raw: string): number | "" {
+  if (!raw.trim()) return "";
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : "";
+}
 
 /**
  * 执行记录页面。
@@ -27,11 +51,14 @@ export function ExecutionsPage(): JSX.Element {
   const [taskId, setTaskId] = useUrlStringParam("task_id");
   const [taskName, setTaskName] = useUrlStringParam("task_name");
   const [status, setStatus] = useUrlStringParam("status");
+  const writeUrlParams = useUrlParamsWriter();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const debouncedTaskId = useDebouncedValue(taskId, 300);
   const debouncedTaskName = useDebouncedValue(taskName, 300);
   const statusFilter = (status as ExecutionStatus | "") || "";
+  const parsedTaskId = parseTaskIdFilter(debouncedTaskId);
   const { page, setPage } = usePagination([debouncedTaskId, debouncedTaskName, statusFilter]);
+  const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: queryKeys.executions.list({
@@ -40,27 +67,34 @@ export function ExecutionsPage(): JSX.Element {
       taskName: debouncedTaskName,
       status: statusFilter,
     }),
-    queryFn: () =>
-      executionsApi.list({
-        page,
-        page_size: 20,
-        task_id: debouncedTaskId ? Number(debouncedTaskId) : "",
-        task_name: debouncedTaskName,
-        status: statusFilter,
-      }),
-    staleTime: 10_000,
+    queryFn: ({ signal }) =>
+      executionsApi.list(
+        {
+          page,
+          page_size: 20,
+          task_id: parsedTaskId,
+          task_name: debouncedTaskName,
+          status: statusFilter,
+        },
+        signal,
+      ),
+    enabled: !debouncedTaskId || parsedTaskId !== "",
+    staleTime: queryStaleTime.list,
     placeholderData: keepPreviousData,
     refetchInterval: (current) => {
-      if (statusFilter === "running") return 3000;
+      if (statusFilter === "running") return RUNNING_POLL_INTERVAL_MS;
       const hasRunning = (current.state.data?.items ?? []).some((item) => item.status === "running");
-      return hasRunning ? 3000 : false;
+      return hasRunning ? RUNNING_POLL_INTERVAL_MS : false;
     },
   });
 
   const detailQuery = useQuery({
     queryKey: queryKeys.executions.detail(selectedId ?? 0),
-    queryFn: () => executionsApi.get(selectedId as number),
+    queryFn: ({ signal }) => executionsApi.get(selectedId as number, signal),
     enabled: selectedId !== null,
+    staleTime: queryStaleTime.realtime,
+    refetchInterval: (current) =>
+      current.state.data?.status === "running" ? RUNNING_POLL_INTERVAL_MS : false,
   });
 
   const statusOptions = useMemo(
@@ -69,6 +103,7 @@ export function ExecutionsPage(): JSX.Element {
   );
 
   const selected = detailQuery.data;
+  const hasActiveFilters = Boolean(taskId || taskName || status);
 
   return (
     <div className="space-y-4">
@@ -77,11 +112,17 @@ export function ExecutionsPage(): JSX.Element {
         description="查询任务运行历史, 日志和错误信息。"
         loading={query.isFetching}
         onRefresh={() => {
-          void query.refetch();
+          void queryClient.invalidateQueries({ queryKey: queryKeys.executions.root });
         }}
       />
       {query.error ? <EmptyState title="执行记录加载失败" description={getErrorMessage(query.error)} /> : null}
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-end">
+      {debouncedTaskId && parsedTaskId === "" ? (
+        <EmptyState title="任务 ID 无效" description="请输入正整数任务 ID, 或改用任务名称筛选。" />
+      ) : null}
+      <FilterBar
+        hasActiveFilters={hasActiveFilters}
+        onClear={() => writeUrlParams({ task_id: null, task_name: null, status: null, page: null })}
+      >
         <div className="relative md:w-64">
           <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
@@ -100,7 +141,7 @@ export function ExecutionsPage(): JSX.Element {
           options={statusOptions}
           className="md:w-36"
         />
-      </div>
+      </FilterBar>
       <DataTableShell>
         <table className="data-table">
           <thead>
@@ -117,7 +158,7 @@ export function ExecutionsPage(): JSX.Element {
             </tr>
           </thead>
           <tbody>
-            {query.isLoading ? <ExecutionTableSkeleton /> : null}
+            {query.isLoading ? <TableSkeleton columns={EXECUTION_SKELETON_COLUMNS} rows={10} /> : null}
             {(query.data?.items ?? []).map((item) => (
               <tr key={item.id}>
                 <td>#{item.id}</td>
@@ -133,7 +174,7 @@ export function ExecutionsPage(): JSX.Element {
                 <td>{item.retry_attempt > 0 ? `${item.retry_attempt} 次` : "-"}</td>
                 <td>{formatDateTime(item.started_at)}</td>
                 <td>{formatDateTime(item.finished_at)}</td>
-                <td>{formatDuration(item.duration_ms !== null ? Math.round(item.duration_ms / 1000) : null)}</td>
+                <td>{formatDurationMs(item.duration_ms)}</td>
                 <td className="text-right">
                   <div className="flex justify-end">
                     <TooltipIconButton label="查看详情" variant="ghost" onClick={() => setSelectedId(item.id)}>
@@ -155,7 +196,7 @@ export function ExecutionsPage(): JSX.Element {
       />
 
       <Dialog open={selectedId !== null} onOpenChange={(open) => !open && setSelectedId(null)}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>执行详情 #{selectedId}</DialogTitle>
           </DialogHeader>
@@ -204,9 +245,7 @@ export function ExecutionsPage(): JSX.Element {
                 </div>
                 <div>
                   <span className="text-muted-foreground">执行耗时: </span>
-                  <span>
-                    {formatDuration(selected?.duration_ms != null ? Math.round(selected.duration_ms / 1000) : null)}
-                  </span>
+                  <span>{formatDurationMs(selected?.duration_ms)}</span>
                 </div>
                 <div>
                   <span className="text-muted-foreground">重试次数: </span>
@@ -216,24 +255,40 @@ export function ExecutionsPage(): JSX.Element {
 
               <div>
                 <div className="field-label mb-2">日志</div>
-                <pre className="code-block">{selected?.logs.length ? selected.logs.join("\n") : "暂无日志"}</pre>
+                <CodeBlock content={(selected?.logs ?? []).join("\n")} emptyText="暂无日志" />
               </div>
+
+              {selected?.result_data && Object.keys(selected.result_data).length > 0 ? (
+                <div>
+                  <div className="field-label mb-2">结果数据</div>
+                  <CodeBlock content={formatJson(selected.result_data)} />
+                </div>
+              ) : null}
+
+              {selected?.result_message ? (
+                <div>
+                  <div className="field-label mb-2">结果消息</div>
+                  <CodeBlock content={selected.result_message} />
+                </div>
+              ) : null}
 
               {selected?.error_message ? (
                 <div>
-                  <div className="field-label mb-2 text-destructive">错误消息</div>
-                  <pre className="code-block border-destructive/20 bg-destructive/5 text-destructive">
-                    {selected.error_message}
-                  </pre>
+                  <div className="mb-2 field-label text-destructive">错误消息</div>
+                  <CodeBlock
+                    content={selected.error_message}
+                    className="border-destructive/20 bg-destructive/5 text-destructive"
+                  />
                 </div>
               ) : null}
 
               {selected?.error_traceback ? (
                 <div>
-                  <div className="field-label mb-2 text-destructive">错误堆栈</div>
-                  <pre className="code-block border-destructive/20 bg-destructive/5 text-xs text-destructive max-h-60 overflow-y-auto font-mono">
-                    {selected.error_traceback}
-                  </pre>
+                  <div className="mb-2 field-label text-destructive">错误堆栈</div>
+                  <CodeBlock
+                    content={selected.error_traceback}
+                    className="max-h-60 border-destructive/20 bg-destructive/5 font-mono text-xs text-destructive"
+                  />
                 </div>
               ) : null}
             </div>
@@ -241,48 +296,5 @@ export function ExecutionsPage(): JSX.Element {
         </DialogContent>
       </Dialog>
     </div>
-  );
-}
-
-/**
- * 执行记录表格骨架屏。
- */
-function ExecutionTableSkeleton(): JSX.Element {
-  return (
-    <>
-      {Array.from({ length: 10 }).map((_, index) => (
-        <tr key={index}>
-          <td>
-            <Skeleton className="h-4 w-12" />
-          </td>
-          <td>
-            <Skeleton className="h-4 w-36" />
-          </td>
-          <td>
-            <Skeleton className="h-4 w-24" />
-          </td>
-          <td>
-            <Skeleton className="h-6 w-16" />
-          </td>
-          <td>
-            <Skeleton className="h-4 w-12" />
-          </td>
-          <td>
-            <Skeleton className="h-4 w-40" />
-          </td>
-          <td>
-            <Skeleton className="h-4 w-40" />
-          </td>
-          <td>
-            <Skeleton className="h-4 w-16" />
-          </td>
-          <td className="text-right">
-            <div className="flex justify-end">
-              <Skeleton className="h-8 w-8 rounded-md" />
-            </div>
-          </td>
-        </tr>
-      ))}
-    </>
   );
 }

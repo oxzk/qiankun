@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { ConfirmDialog, EmptyState, SectionHeader } from "@/components/common";
+import { ConfirmDialog, EmptyState, FilterBar, SectionHeader } from "@/components/common";
 import { PaginationBar } from "@/components/data/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,8 +10,9 @@ import { Select } from "@/components/ui/select";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { usePagination } from "@/hooks/use-pagination";
 import { useToastMutation } from "@/hooks/use-toast-mutation";
-import { useUrlStringParam } from "@/hooks/use-url-state";
-import { getErrorMessage, tasksApi, executionsApi } from "@/lib/api";
+import { useUrlParamsWriter, useUrlStringParam } from "@/hooks/use-url-state";
+import { executionsApi, getErrorMessage, tasksApi } from "@/lib/api";
+import { queryStaleTime, RUNNING_POLL_INTERVAL_MS } from "@/lib/query-options";
 import { queryKeys } from "@/lib/query-keys";
 import type { Task, TaskPayload } from "@/types";
 import { TaskDialog } from "./task-dialog";
@@ -37,6 +38,7 @@ interface ConfirmState {
 export function TasksPage(): JSX.Element {
   const [name, setName] = useUrlStringParam("q");
   const [enabledParam, setEnabledParam] = useUrlStringParam("enabled");
+  const writeUrlParams = useUrlParamsWriter();
   const enabledFilter: boolean | "" = enabledParam === "true" ? true : enabledParam === "false" ? false : "";
   const [editing, setEditing] = useState<Task | null>(null);
   const [open, setOpen] = useState(false);
@@ -45,25 +47,32 @@ export function TasksPage(): JSX.Element {
   const debouncedName = useDebouncedValue(name, 300);
   const { page, setPage } = usePagination([debouncedName, enabledFilter]);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: queryKeys.tasks.list({ page, name: debouncedName, enabled: enabledFilter }),
-    queryFn: () =>
-      tasksApi.list({
-        page,
-        page_size: 20,
-        enabled: enabledFilter,
-        name: debouncedName.trim() || undefined,
-      }),
-    staleTime: 10_000,
+    queryFn: ({ signal }) =>
+      tasksApi.list(
+        {
+          page,
+          page_size: 20,
+          enabled: enabledFilter,
+          name: debouncedName.trim() || undefined,
+        },
+        signal,
+      ),
+    staleTime: queryStaleTime.list,
     placeholderData: keepPreviousData,
   });
 
   const runningQuery = useQuery({
     queryKey: queryKeys.executions.running,
-    queryFn: () => executionsApi.list({ status: "running", page_size: 100 }),
-    staleTime: 3_000,
-    refetchInterval: (current) => ((current.state.data?.items?.length ?? 0) > 0 || optimisticRunningTaskIds.size > 0 ? 3000 : false),
+    queryFn: ({ signal }) => executionsApi.list({ status: "running", page_size: 100 }, signal),
+    staleTime: queryStaleTime.realtime,
+    refetchInterval: (current) =>
+      (current.state.data?.items?.length ?? 0) > 0 || optimisticRunningTaskIds.size > 0
+        ? RUNNING_POLL_INTERVAL_MS
+        : false,
   });
 
   const serverRunningTaskIds = useMemo(() => {
@@ -128,6 +137,34 @@ export function TasksPage(): JSX.Element {
   const pendingTaskId =
     actionMutation.isPending && actionMutation.variables ? actionMutation.variables.task.id : null;
 
+  const handleToggle = useCallback(
+    (task: Task, enabled: boolean) => {
+      actionMutation.mutate({ task, action: "toggle", enabled });
+    },
+    [actionMutation],
+  );
+
+  const handleExecute = useCallback(
+    (task: Task) => {
+      setOptimisticRunningTaskIds((current) => new Set(current).add(task.id));
+      actionMutation.mutate({ task, action: "run" });
+    },
+    [actionMutation],
+  );
+
+  const handleCancel = useCallback((task: Task) => {
+    setConfirmState({ task, action: "cancel" });
+  }, []);
+
+  const handleEdit = useCallback((task: Task) => {
+    setEditing(task);
+    setOpen(true);
+  }, []);
+
+  const handleDelete = useCallback((task: Task) => {
+    setConfirmState({ task, action: "delete" });
+  }, []);
+
   /**
    * 打开创建任务弹窗。
    */
@@ -139,9 +176,12 @@ export function TasksPage(): JSX.Element {
   /**
    * 跳转到当前任务的执行记录。
    */
-  function openExecutions(task: Task): void {
-    navigate(`/executions?task_id=${task.id}`);
-  }
+  const openExecutions = useCallback(
+    (task: Task) => {
+      navigate(`/executions?task_id=${task.id}`);
+    },
+    [navigate],
+  );
 
   /**
    * 执行已确认的任务操作。
@@ -159,6 +199,15 @@ export function TasksPage(): JSX.Element {
     else setEnabledParam(String(value));
   }
 
+  /**
+   * 清空全部筛选。
+   */
+  function clearFilters(): void {
+    writeUrlParams({ q: null, enabled: null, page: null });
+  }
+
+  const hasActiveFilters = Boolean(name || enabledParam);
+
   return (
     <div className="space-y-4">
       <SectionHeader
@@ -166,12 +215,12 @@ export function TasksPage(): JSX.Element {
         description="维护 cron 调度任务, 控制启停和手动执行。"
         loading={query.isFetching || runningQuery.isFetching}
         onRefresh={() => {
-          void query.refetch();
-          void runningQuery.refetch();
+          void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.root });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.executions.running });
         }}
         actions={
           <Button size="sm" onClick={createTask}>
-            <Plus className="h-4 w-4 mr-1" />
+            <Plus className="mr-1 h-4 w-4" />
             新建任务
           </Button>
         }
@@ -179,7 +228,7 @@ export function TasksPage(): JSX.Element {
 
       {query.error ? <EmptyState title="任务加载失败" description={getErrorMessage(query.error)} /> : null}
 
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-end">
+      <FilterBar hasActiveFilters={hasActiveFilters} onClear={clearFilters}>
         <div className="relative md:w-80">
           <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="按任务名过滤" className="pl-9" />
@@ -194,25 +243,19 @@ export function TasksPage(): JSX.Element {
           ]}
           className="md:w-36"
         />
-      </div>
+      </FilterBar>
 
       <TaskTable
         tasks={query.data?.items ?? []}
         loading={query.isLoading}
         runningTaskIds={runningTaskIds}
         pendingTaskId={pendingTaskId}
-        onToggle={(task, enabled) => actionMutation.mutate({ task, action: "toggle", enabled })}
-        onExecute={(task) => {
-          setOptimisticRunningTaskIds((current) => new Set(current).add(task.id));
-          actionMutation.mutate({ task, action: "run" });
-        }}
-        onCancel={(task) => setConfirmState({ task, action: "cancel" })}
+        onToggle={handleToggle}
+        onExecute={handleExecute}
+        onCancel={handleCancel}
         onExecutions={openExecutions}
-        onEdit={(task) => {
-          setEditing(task);
-          setOpen(true);
-        }}
-        onDelete={(task) => setConfirmState({ task, action: "delete" })}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
       />
 
       <PaginationBar page={query.data?.page ?? page} pageSize={query.data?.page_size} total={query.data?.total} onPageChange={setPage} />

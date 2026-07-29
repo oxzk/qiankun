@@ -47,11 +47,7 @@ class ZeroProvider(BaseBrowserProvider):
     LOGIN_SUBMIT_SELECTOR: ClassVar[str] = "form button[type='submit']"
     SPIN_BUTTON_SELECTOR: ClassVar[str] = "button.spin-button"
     POINTS_SELECTOR: ClassVar[str] = ".count-up-value"
-    PAGE_READY_SELECTORS: ClassVar[tuple[str, ...]] = (
-        "input#email[type='email']",
-        "button.spin-button",
-        ".count-up-value",
-    )
+    LOGIN_URL_KEYWORD: ClassVar[str] = "login"
     CHECK_IN_UNCONFIRMED: ClassVar[str] = "签到结果未确认"
     LOGIN_MAX_ATTEMPTS: ClassVar[int] = 2
     PAGE_READY_TIMEOUT_MS: ClassVar[int] = 15_000
@@ -65,16 +61,24 @@ class ZeroProvider(BaseBrowserProvider):
     ) -> ProviderResult:
         """在已启动浏览器中执行登录与签到流程。"""
         config = ZeroConfig.model_validate(provider_config)
-        opened = await self._open_checkin_page(browser)
-        if not opened:
+        try:
+            # URL 含 login 表示被重定向到登录页, 需要登录.
+            needs_login = await self.open_url_and_check(
+                browser,
+                self.CHECKIN_URL,
+                self.LOGIN_URL_KEYWORD,
+                timeout_ms=self.PAGE_READY_TIMEOUT_MS,
+            )
+        except Exception as exc:
+            self.log(f"打开签到页失败: {type(exc).__name__}: {exc}")
             return await self.fail_with_screenshot(
                 browser,
                 message="Zero 打开签到页失败",
                 reason="open_checkin_failed",
-                data={"url": browser.current_url()},
+                data={"url": browser.current_url(), "error": str(exc)},
             )
 
-        if await self._needs_login(browser):
+        if needs_login:
             self.log(f"检测到登录页: {browser.current_url()}")
             login_error = await self._login(browser, config)
             if login_error is not None:
@@ -88,9 +92,18 @@ class ZeroProvider(BaseBrowserProvider):
                     data={"url": browser.current_url()},
                 )
             self.log(f"登录成功: {browser.current_url()}")
-            # 登录成功后重新进入签到页, 确保后续读取积分与点击按钮。
-            opened = await self._open_checkin_page(browser)
-            if not opened or await self._needs_login(browser):
+            # 登录成功后重新进入签到页, 确保后续读取积分与点击按钮.
+            try:
+                still_on_login = await self.open_url_and_check(
+                    browser,
+                    self.CHECKIN_URL,
+                    self.LOGIN_URL_KEYWORD,
+                    timeout_ms=self.PAGE_READY_TIMEOUT_MS,
+                )
+            except Exception as exc:
+                self.log(f"登录后打开签到页失败: {type(exc).__name__}: {exc}")
+                still_on_login = True
+            if still_on_login:
                 return await self.fail_with_screenshot(
                     browser,
                     message="Zero 登录后无法进入签到页",
@@ -106,7 +119,7 @@ class ZeroProvider(BaseBrowserProvider):
         check_in_status = await self._check_in(browser, before_points=before_points)
 
         after_points = await self._get_points(browser, navigate=True)
-        # 若点击后已通过积分变化确认成功, 优先保留签到后读到的最新积分。
+        # 若点击后已通过积分变化确认成功, 优先保留签到后读到的最新积分.
         if after_points is None and check_in_status == self.CHECK_IN_SUCCESS:
             after_points = before_points
         self.log(f"签到后积分: {after_points or '-'}")
@@ -150,38 +163,13 @@ class ZeroProvider(BaseBrowserProvider):
             data=data,
         )
 
-    async def _open_checkin_page(self, browser: BaseCamoufox) -> bool:
-        """访问签到页并等待关键业务节点出现。"""
-        self.log(f"打开签到页: {self.CHECKIN_URL}")
-        try:
-            await browser.goto(self.CHECKIN_URL)
-            ready = await self.wait_for_any_selector(
-                browser,
-                self.PAGE_READY_SELECTORS,
-                timeout_ms=self.PAGE_READY_TIMEOUT_MS,
-            )
-            if not ready:
-                self.log(f"签到页关键节点未出现: {browser.current_url()}")
-                return False
-            self.log(f"页面就绪: {browser.current_url()}")
-            return True
-        except Exception as exc:
-            self.log(f"打开签到页失败: {type(exc).__name__}: {exc}")
-            return False
-
     def _is_login_url(self, browser: BaseCamoufox) -> bool:
         """判断当前 URL 是否包含 login。"""
-        return "login" in browser.current_url().lower()
+        return self.LOGIN_URL_KEYWORD in browser.current_url().lower()
 
     async def _is_login_form_visible(self, browser: BaseCamoufox) -> bool:
         """判断登录表单是否可见。"""
         return await self.is_selector_visible(browser, self.EMAIL_SELECTOR)
-
-    async def _needs_login(self, browser: BaseCamoufox) -> bool:
-        """URL 或登录表单任一满足时判定需要登录。"""
-        if self._is_login_url(browser):
-            return True
-        return await self._is_login_form_visible(browser)
 
     async def _is_login_success(self, browser: BaseCamoufox) -> bool:
         """登录成功: URL 离开 login, 且登录表单不可见。"""

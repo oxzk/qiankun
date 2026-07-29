@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from re import Pattern
 from types import TracebackType
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from app.shared.errors import AppError
 
@@ -78,13 +77,21 @@ class BaseCamoufox:
 
     async def launch(
         self,
-        headless: bool = False,
+        headless: bool | Literal["virtual"] = False,
         proxy: str | None = None,
         user_data_dir: str | Path | None = None,
         context_options: dict[str, object] | None = None,
         **launch_options: object,
     ) -> Any:
-        """启动 Camoufox 浏览器并创建页面。"""
+        """启动 Camoufox 浏览器并创建页面。
+
+        Args:
+            headless: 无头模式. True 无头, False 有界面, ``"virtual"`` 使用虚拟显示.
+            proxy: 代理地址.
+            user_data_dir: 持久化用户数据目录.
+            context_options: 浏览器上下文额外选项.
+            **launch_options: 透传给 Camoufox 的启动参数.
+        """
         if self._page is not None:
             return self._page
 
@@ -131,31 +138,6 @@ class BaseCamoufox:
         self._browser = None
         self._persistent_context = False
 
-    async def find(
-        self,
-        role: str,
-        name: str | Pattern[str] | None = None,
-        **options: object,
-    ) -> Any:
-        """按无障碍角色查找第一个匹配元素。"""
-        return self.page.get_by_role(role, name=name, **options).first
-
-    async def find_all(
-        self,
-        role: str,
-        name: str | Pattern[str] | None = None,
-        **options: object,
-    ) -> list[Any]:
-        """按无障碍角色查找所有匹配元素。"""
-        locator = self.page.get_by_role(role, name=name, **options)
-        count = await locator.count()
-        return [locator.nth(index) for index in range(count)]
-
-    async def click(self, role: str, timeout: float | None = None) -> None:
-        """按无障碍角色查找并点击元素。"""
-        locator = await self.find(role)
-        await locator.click(timeout=timeout)
-
     async def click_and_wait_for_page(self, locator: Any, timeout: float | None = None) -> Any:
         """点击目标元素并等待新标签页。"""
         if self._context is None:
@@ -167,20 +149,6 @@ class BaseCamoufox:
         new_page.set_default_timeout(self.DEFAULT_TIMEOUT * 1000)
         self.set_page(new_page)
         return new_page
-
-    async def type_text(
-        self,
-        role: str,
-        text: str,
-        delay: float | None = 50,
-        no_wait_after: bool | None = None,
-        clear: bool = True,
-    ) -> None:
-        """按无障碍角色查找元素并输入文本。"""
-        locator = await self.find(role)
-        if clear:
-            await locator.fill("")
-        await locator.type(text, delay=delay, no_wait_after=no_wait_after)
 
     async def evaluate(self, script: str, arg: object | None = None) -> object:
         """在页面上下文执行 JavaScript。"""
@@ -241,6 +209,22 @@ class BaseCamoufox:
     async def wait_for_load_state(self, state: str = "networkidle") -> None:
         """等待页面达到指定加载状态。"""
         await self.page.wait_for_load_state(state)
+
+    async def wait_for_url(
+        self,
+        url: str | object,
+        *,
+        wait_until: str | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        """等待当前页面 URL 匹配指定条件。
+
+        Args:
+            url: 目标 URL 字符串, 正则, 或 ``(url: str) -> bool`` 判定函数.
+            wait_until: 匹配后额外等待的加载状态, 可选.
+            timeout: 最长等待毫秒数; ``None`` 使用页面默认超时.
+        """
+        await self.page.wait_for_url(url, wait_until=wait_until, timeout=timeout)
 
     def locator(self, selector: str) -> Any:
         """按 CSS/文本选择器创建定位器。"""

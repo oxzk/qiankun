@@ -1,87 +1,83 @@
-import axios, { AxiosError, type AxiosInstance } from "axios";
-import { storage } from "@/lib/storage";
+import { API_PREFIX, compactParams, http, unwrap, withSignal } from "@/lib/http";
 import type {
-  ApiResponse,
   BackupInfo,
   Execution,
   ExecutionStatus,
+  JsonRecord,
   NotificationPayload,
   NotificationSetting,
   PaginatedResponse,
-  Task,
-  TaskPayload,
-  TaskStats,
-  TokenResponse,
   ProviderInfo,
   ProviderPayload,
   ProviderResult,
   ProviderValidateResult,
-  JsonRecord,
+  Task,
+  TaskPayload,
+  TaskStats,
+  TokenResponse,
+  User,
 } from "@/types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
-const API_PREFIX = import.meta.env.VITE_API_PREFIX || "/api";
+export { getErrorMessage } from "@/lib/http";
 
 /**
- * 创建 HTTP 客户端。
+ * 列表查询公共分页参数。
  */
-function createHttpClient(): AxiosInstance {
-  const instance = axios.create({
-    baseURL: API_BASE_URL,
-    timeout: 60000,
-  });
-
-  instance.interceptors.request.use((config) => {
-    const token = storage.getToken();
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
-
-  instance.interceptors.response.use(
-    (response) => response,
-    (error: AxiosError<ApiResponse<unknown>>) => {
-      if (error.response?.status === 401) {
-        storage.removeToken();
-        window.dispatchEvent(new CustomEvent("qiankun:unauthorized"));
-      }
-      return Promise.reject(error);
-    },
-  );
-
-  return instance;
-}
-
-const http = createHttpClient();
-
-/**
- * 清理空查询参数。
- */
-function compactParams(params: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(params).filter(
-      ([, value]) => value !== undefined && value !== null && value !== ""
-    )
-  );
+export interface PageQuery {
+  /**
+   * 页码。
+   */
+  page?: number;
+  /**
+   * 每页条数。
+   */
+  page_size?: number;
 }
 
 /**
- * 提取统一响应数据。
+ * 任务列表查询参数。
  */
-async function unwrap<T>(request: Promise<{ data: ApiResponse<T> }>): Promise<T> {
-  const response = await request;
-  if (!response.data.success) throw new Error(response.data.message || "请求失败");
-  return response.data.data as T;
+export interface TasksListQuery extends PageQuery {
+  /**
+   * 启用状态筛选。
+   */
+  enabled?: boolean | "";
+  /**
+   * 执行器名称筛选。
+   */
+  provider_name?: string;
+  /**
+   * 任务名称筛选。
+   */
+  name?: string;
 }
 
 /**
- * 提取错误消息。
+ * 执行记录列表查询参数。
  */
-export function getErrorMessage(error: unknown): string {
-  if (axios.isAxiosError<ApiResponse<unknown>>(error)) {
-    return error.response?.data?.message || error.message || "请求失败";
-  }
-  if (error instanceof Error) return error.message;
-  return "请求失败";
+export interface ExecutionsListQuery extends PageQuery {
+  /**
+   * 任务 ID 筛选。
+   */
+  task_id?: number | "";
+  /**
+   * 任务名称筛选。
+   */
+  task_name?: string;
+  /**
+   * 执行状态筛选。
+   */
+  status?: ExecutionStatus | "";
+}
+
+/**
+ * Provider 列表查询参数。
+ */
+export interface ProvidersListQuery extends PageQuery {
+  /**
+   * 启用状态筛选。
+   */
+  enabled?: boolean | "";
 }
 
 /**
@@ -91,15 +87,26 @@ export const authApi = {
   /**
    * 用户名密码登录。
    */
-  login(username: string, password: string): Promise<TokenResponse> {
-    return unwrap<TokenResponse>(http.post(`${API_PREFIX}/auth/login`, { username, password }));
+  login(username: string, password: string, signal?: AbortSignal): Promise<TokenResponse> {
+    return unwrap<TokenResponse>(
+      http.post(`${API_PREFIX}/auth/login`, { username, password }, withSignal(signal)),
+    );
+  },
+
+  /**
+   * 查询当前登录用户。
+   */
+  me(signal?: AbortSignal): Promise<User> {
+    return unwrap<User>(http.get(`${API_PREFIX}/auth/me`, withSignal(signal)));
   },
 
   /**
    * 修改密码。
    */
-  changePassword(old_password: string, new_password: string): Promise<boolean> {
-    return unwrap<boolean>(http.post(`${API_PREFIX}/auth/change-password`, { old_password, new_password }));
+  changePassword(old_password: string, new_password: string, signal?: AbortSignal): Promise<boolean> {
+    return unwrap<boolean>(
+      http.post(`${API_PREFIX}/auth/change-password`, { old_password, new_password }, withSignal(signal)),
+    );
   },
 };
 
@@ -110,8 +117,8 @@ export const statsApi = {
   /**
    * 查询任务统计摘要。
    */
-  getStats(): Promise<TaskStats> {
-    return unwrap<TaskStats>(http.get(`${API_PREFIX}/stats`));
+  getStats(signal?: AbortSignal): Promise<TaskStats> {
+    return unwrap<TaskStats>(http.get(`${API_PREFIX}/stats`, withSignal(signal)));
   },
 };
 
@@ -119,35 +126,55 @@ export const statsApi = {
  * 任务接口。
  */
 export const tasksApi = {
-  list(query: {
-    page?: number;
-    page_size?: number;
-    enabled?: boolean | "";
-    provider_name?: string;
-    name?: string;
-  } = {}): Promise<PaginatedResponse<Task>> {
-    return unwrap<PaginatedResponse<Task>>(http.get(`${API_PREFIX}/tasks`, { params: compactParams(query) }));
+  /**
+   * 分页查询任务。
+   */
+  list(query: TasksListQuery = {}, signal?: AbortSignal): Promise<PaginatedResponse<Task>> {
+    return unwrap<PaginatedResponse<Task>>(
+      http.get(`${API_PREFIX}/tasks`, { params: compactParams(query), ...withSignal(signal) }),
+    );
   },
-  create(payload: TaskPayload): Promise<Task> {
-    return unwrap<Task>(http.post(`${API_PREFIX}/tasks`, payload));
+  /**
+   * 创建任务。
+   */
+  create(payload: TaskPayload, signal?: AbortSignal): Promise<Task> {
+    return unwrap<Task>(http.post(`${API_PREFIX}/tasks`, payload, withSignal(signal)));
   },
-  update(taskId: number, payload: TaskPayload): Promise<Task> {
-    return unwrap<Task>(http.put(`${API_PREFIX}/tasks/${taskId}`, payload));
+  /**
+   * 更新任务。
+   */
+  update(taskId: number, payload: TaskPayload, signal?: AbortSignal): Promise<Task> {
+    return unwrap<Task>(http.put(`${API_PREFIX}/tasks/${taskId}`, payload, withSignal(signal)));
   },
-  delete(taskId: number): Promise<null> {
-    return unwrap<null>(http.delete(`${API_PREFIX}/tasks/${taskId}`));
+  /**
+   * 删除任务。
+   */
+  delete(taskId: number, signal?: AbortSignal): Promise<null> {
+    return unwrap<null>(http.delete(`${API_PREFIX}/tasks/${taskId}`, withSignal(signal)));
   },
-  run(taskId: number): Promise<boolean> {
-    return unwrap<boolean>(http.post(`${API_PREFIX}/tasks/${taskId}/run`));
+  /**
+   * 手动触发任务。
+   */
+  run(taskId: number, signal?: AbortSignal): Promise<boolean> {
+    return unwrap<boolean>(http.post(`${API_PREFIX}/tasks/${taskId}/run`, undefined, withSignal(signal)));
   },
-  cancel(taskId: number): Promise<boolean> {
-    return unwrap<boolean>(http.post(`${API_PREFIX}/tasks/${taskId}/cancel`));
+  /**
+   * 取消任务当前执行。
+   */
+  cancel(taskId: number, signal?: AbortSignal): Promise<boolean> {
+    return unwrap<boolean>(http.post(`${API_PREFIX}/tasks/${taskId}/cancel`, undefined, withSignal(signal)));
   },
-  enable(taskId: number): Promise<Task> {
-    return unwrap<Task>(http.post(`${API_PREFIX}/tasks/${taskId}/enable`));
+  /**
+   * 启用任务。
+   */
+  enable(taskId: number, signal?: AbortSignal): Promise<Task> {
+    return unwrap<Task>(http.post(`${API_PREFIX}/tasks/${taskId}/enable`, undefined, withSignal(signal)));
   },
-  disable(taskId: number): Promise<Task> {
-    return unwrap<Task>(http.post(`${API_PREFIX}/tasks/${taskId}/disable`));
+  /**
+   * 停用任务。
+   */
+  disable(taskId: number, signal?: AbortSignal): Promise<Task> {
+    return unwrap<Task>(http.post(`${API_PREFIX}/tasks/${taskId}/disable`, undefined, withSignal(signal)));
   },
 };
 
@@ -155,11 +182,19 @@ export const tasksApi = {
  * 执行记录接口。
  */
 export const executionsApi = {
-  list(query: { page?: number; page_size?: number; task_id?: number | ""; task_name?: string; status?: ExecutionStatus | "" } = {}): Promise<PaginatedResponse<Execution>> {
-    return unwrap<PaginatedResponse<Execution>>(http.get(`${API_PREFIX}/executions`, { params: compactParams(query) }));
+  /**
+   * 分页查询执行记录。
+   */
+  list(query: ExecutionsListQuery = {}, signal?: AbortSignal): Promise<PaginatedResponse<Execution>> {
+    return unwrap<PaginatedResponse<Execution>>(
+      http.get(`${API_PREFIX}/executions`, { params: compactParams(query), ...withSignal(signal) }),
+    );
   },
-  get(executionId: number): Promise<Execution> {
-    return unwrap<Execution>(http.get(`${API_PREFIX}/executions/${executionId}`));
+  /**
+   * 查询执行详情。
+   */
+  get(executionId: number, signal?: AbortSignal): Promise<Execution> {
+    return unwrap<Execution>(http.get(`${API_PREFIX}/executions/${executionId}`, withSignal(signal)));
   },
 };
 
@@ -167,38 +202,88 @@ export const executionsApi = {
  * Provider 接口。
  */
 export const providersApi = {
-  list(query: { page?: number; page_size?: number; enabled?: boolean | "" } = {}): Promise<PaginatedResponse<ProviderInfo>> {
-    return unwrap<PaginatedResponse<ProviderInfo>>(http.get(`${API_PREFIX}/providers`, { params: compactParams(query) }));
-  },
-  get(providerName: string): Promise<ProviderInfo> {
-    return unwrap<ProviderInfo>(http.get(`${API_PREFIX}/providers/${providerName}`));
-  },
-  create(payload: ProviderPayload): Promise<ProviderInfo> {
-    return unwrap<ProviderInfo>(http.post(`${API_PREFIX}/providers`, payload));
-  },
-  update(providerName: string, payload: ProviderPayload): Promise<ProviderInfo> {
-    return unwrap<ProviderInfo>(http.put(`${API_PREFIX}/providers/${providerName}`, payload));
-  },
-  enable(providerName: string): Promise<ProviderInfo> {
-    return unwrap<ProviderInfo>(http.post(`${API_PREFIX}/providers/${providerName}/enable`));
-  },
-  disable(providerName: string): Promise<ProviderInfo> {
-    return unwrap<ProviderInfo>(http.post(`${API_PREFIX}/providers/${providerName}/disable`));
-  },
-  config(providerName: string): Promise<JsonRecord> {
-    return unwrap<JsonRecord>(http.get(`${API_PREFIX}/providers/${providerName}/config`));
-  },
-  sync(): Promise<boolean> {
-    return unwrap<boolean>(http.post(`${API_PREFIX}/providers/sync`));
-  },
-  validateConfig(providerName: string, config: JsonRecord): Promise<ProviderValidateResult> {
-    return unwrap<ProviderValidateResult>(
-      http.post(`${API_PREFIX}/providers/${providerName}/validate-config`, { config })
+  /**
+   * 分页查询执行器。
+   */
+  list(query: ProvidersListQuery = {}, signal?: AbortSignal): Promise<PaginatedResponse<ProviderInfo>> {
+    return unwrap<PaginatedResponse<ProviderInfo>>(
+      http.get(`${API_PREFIX}/providers`, { params: compactParams(query), ...withSignal(signal) }),
     );
   },
-  testRun(providerName: string, config: JsonRecord = {}): Promise<ProviderResult> {
+  /**
+   * 查询单个执行器。
+   */
+  get(providerName: string, signal?: AbortSignal): Promise<ProviderInfo> {
+    return unwrap<ProviderInfo>(
+      http.get(`${API_PREFIX}/providers/${encodeURIComponent(providerName)}`, withSignal(signal)),
+    );
+  },
+  /**
+   * 创建执行器。
+   */
+  create(payload: ProviderPayload, signal?: AbortSignal): Promise<ProviderInfo> {
+    return unwrap<ProviderInfo>(http.post(`${API_PREFIX}/providers`, payload, withSignal(signal)));
+  },
+  /**
+   * 更新执行器。
+   */
+  update(providerName: string, payload: ProviderPayload, signal?: AbortSignal): Promise<ProviderInfo> {
+    return unwrap<ProviderInfo>(
+      http.put(`${API_PREFIX}/providers/${encodeURIComponent(providerName)}`, payload, withSignal(signal)),
+    );
+  },
+  /**
+   * 启用执行器。
+   */
+  enable(providerName: string, signal?: AbortSignal): Promise<ProviderInfo> {
+    return unwrap<ProviderInfo>(
+      http.post(`${API_PREFIX}/providers/${encodeURIComponent(providerName)}/enable`, undefined, withSignal(signal)),
+    );
+  },
+  /**
+   * 停用执行器。
+   */
+  disable(providerName: string, signal?: AbortSignal): Promise<ProviderInfo> {
+    return unwrap<ProviderInfo>(
+      http.post(`${API_PREFIX}/providers/${encodeURIComponent(providerName)}/disable`, undefined, withSignal(signal)),
+    );
+  },
+  /**
+   * 读取执行器默认配置。
+   */
+  config(providerName: string, signal?: AbortSignal): Promise<JsonRecord> {
+    return unwrap<JsonRecord>(
+      http.get(`${API_PREFIX}/providers/${encodeURIComponent(providerName)}/config`, withSignal(signal)),
+    );
+  },
+  /**
+   * 同步内置执行器。
+   */
+  sync(signal?: AbortSignal): Promise<boolean> {
+    return unwrap<boolean>(http.post(`${API_PREFIX}/providers/sync`, undefined, withSignal(signal)));
+  },
+  /**
+   * 校验执行器配置。
+   */
+  validateConfig(providerName: string, config: JsonRecord, signal?: AbortSignal): Promise<ProviderValidateResult> {
+    return unwrap<ProviderValidateResult>(
+      http.post(
+        `${API_PREFIX}/providers/${encodeURIComponent(providerName)}/validate-config`,
+        { config },
+        withSignal(signal),
+      ),
+    );
+  },
+  /**
+   * 测试运行执行器。
+   */
+  testRun(providerName: string, config: JsonRecord = {}, signal?: AbortSignal): Promise<ProviderResult> {
     return unwrap<ProviderResult>(
-      http.post(`${API_PREFIX}/providers/${providerName}/test-run`, { config })
+      http.post(
+        `${API_PREFIX}/providers/${encodeURIComponent(providerName)}/test-run`,
+        { config },
+        withSignal(signal),
+      ),
     );
   },
 };
@@ -207,14 +292,25 @@ export const providersApi = {
  * 数据备份接口。
  */
 export const backupsApi = {
-  list(): Promise<BackupInfo[]> {
-    return unwrap<BackupInfo[]>(http.get(`${API_PREFIX}/backups`));
+  /**
+   * 列出备份。
+   */
+  list(signal?: AbortSignal): Promise<BackupInfo[]> {
+    return unwrap<BackupInfo[]>(http.get(`${API_PREFIX}/backups`, withSignal(signal)));
   },
-  create(): Promise<BackupInfo> {
-    return unwrap<BackupInfo>(http.post(`${API_PREFIX}/backups`));
+  /**
+   * 创建备份。
+   */
+  create(signal?: AbortSignal): Promise<BackupInfo> {
+    return unwrap<BackupInfo>(http.post(`${API_PREFIX}/backups`, undefined, withSignal(signal)));
   },
-  restore(filename: string): Promise<boolean> {
-    return unwrap<boolean>(http.post(`${API_PREFIX}/backups/${encodeURIComponent(filename)}/restore`));
+  /**
+   * 恢复备份。
+   */
+  restore(filename: string, signal?: AbortSignal): Promise<boolean> {
+    return unwrap<boolean>(
+      http.post(`${API_PREFIX}/backups/${encodeURIComponent(filename)}/restore`, undefined, withSignal(signal)),
+    );
   },
 };
 
@@ -222,21 +318,36 @@ export const backupsApi = {
  * 通知接口。
  */
 export const notificationsApi = {
-  list(query: { page?: number; page_size?: number } = {}): Promise<PaginatedResponse<NotificationSetting>> {
+  /**
+   * 分页查询通知配置。
+   */
+  list(query: PageQuery = {}, signal?: AbortSignal): Promise<PaginatedResponse<NotificationSetting>> {
     return unwrap<PaginatedResponse<NotificationSetting>>(
-      http.get(`${API_PREFIX}/notifications`, { params: compactParams(query) })
+      http.get(`${API_PREFIX}/notifications`, { params: compactParams(query), ...withSignal(signal) }),
     );
   },
-  create(payload: NotificationPayload): Promise<NotificationSetting> {
-    return unwrap<NotificationSetting>(http.post(`${API_PREFIX}/notifications`, payload));
+  /**
+   * 创建通知配置。
+   */
+  create(payload: NotificationPayload, signal?: AbortSignal): Promise<NotificationSetting> {
+    return unwrap<NotificationSetting>(http.post(`${API_PREFIX}/notifications`, payload, withSignal(signal)));
   },
-  update(id: number, payload: NotificationPayload): Promise<NotificationSetting> {
-    return unwrap<NotificationSetting>(http.put(`${API_PREFIX}/notifications/${id}`, payload));
+  /**
+   * 更新通知配置。
+   */
+  update(id: number, payload: NotificationPayload, signal?: AbortSignal): Promise<NotificationSetting> {
+    return unwrap<NotificationSetting>(http.put(`${API_PREFIX}/notifications/${id}`, payload, withSignal(signal)));
   },
-  delete(id: number): Promise<null> {
-    return unwrap<null>(http.delete(`${API_PREFIX}/notifications/${id}`));
+  /**
+   * 删除通知配置。
+   */
+  delete(id: number, signal?: AbortSignal): Promise<null> {
+    return unwrap<null>(http.delete(`${API_PREFIX}/notifications/${id}`, withSignal(signal)));
   },
-  test(id: number, message: string): Promise<null> {
-    return unwrap<null>(http.post(`${API_PREFIX}/notifications/${id}/test`, { message }));
+  /**
+   * 测试通知渠道。
+   */
+  test(id: number, message: string, signal?: AbortSignal): Promise<null> {
+    return unwrap<null>(http.post(`${API_PREFIX}/notifications/${id}/test`, { message }, withSignal(signal)));
   },
 };

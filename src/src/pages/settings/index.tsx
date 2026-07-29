@@ -4,11 +4,14 @@ import { Bell, DatabaseBackup, RotateCcw, User } from "lucide-react";
 import { ConfirmDialog, EmptyState, SectionHeader } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToastMutation } from "@/hooks/use-toast-mutation";
 import { useUrlStringParam } from "@/hooks/use-url-state";
 import { backupsApi, notificationsApi } from "@/lib/api";
+import { formatByteSize, formatDateTime } from "@/lib/datetime";
+import { queryStaleTime } from "@/lib/query-options";
 import { queryKeys } from "@/lib/query-keys";
 import type { BackupInfo, JsonRecord, NotificationPayload, NotificationSetting, NotifyType } from "@/types";
 import { NotificationChannelCard } from "./notification-channel-card";
@@ -44,19 +47,20 @@ export function SettingsPage(): JSX.Element {
   const activeTab = resolveSettingsTab(tabParam);
   const [editingChannel, setEditingChannel] = useState<NotifyType | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<BackupInfo | null>(null);
+  const [restoreConfirmText, setRestoreConfirmText] = useState("");
 
   const notificationsQuery = useQuery({
     queryKey: queryKeys.notifications.root,
-    queryFn: () => notificationsApi.list({ page: 1, page_size: 100 }),
+    queryFn: ({ signal }) => notificationsApi.list({ page: 1, page_size: 100 }, signal),
     enabled: activeTab === "notify",
-    staleTime: 60_000,
+    staleTime: queryStaleTime.catalog,
   });
 
   const backupsQuery = useQuery({
     queryKey: queryKeys.backups.root,
-    queryFn: () => backupsApi.list(),
+    queryFn: ({ signal }) => backupsApi.list(signal),
     enabled: activeTab === "backup",
-    staleTime: 30_000,
+    staleTime: queryStaleTime.list,
   });
 
   const saveMutation = useToastMutation<NotificationSetting, NotificationSaveVariables>({
@@ -66,7 +70,7 @@ export function SettingsPage(): JSX.Element {
     },
     successTitle: "配置已更新",
     errorTitle: "保存失败",
-    invalidate: [queryKeys.notifications.root],
+    invalidate: [queryKeys.notifications.root, queryKeys.notifications.options],
     onSuccess: () => {
       setEditingChannel(null);
     },
@@ -93,6 +97,7 @@ export function SettingsPage(): JSX.Element {
     ],
     onSuccess: () => {
       setRestoreTarget(null);
+      setRestoreConfirmText("");
     },
   });
 
@@ -127,6 +132,8 @@ export function SettingsPage(): JSX.Element {
   const headerLoading =
     (activeTab === "notify" && notificationsQuery.isFetching) ||
     (activeTab === "backup" && backupsQuery.isFetching);
+
+  const restoreFilenameMatched = Boolean(restoreTarget && restoreConfirmText.trim() === restoreTarget.filename);
 
   return (
     <div className="space-y-6">
@@ -185,7 +192,10 @@ export function SettingsPage(): JSX.Element {
             creating={createBackupMutation.isPending}
             restoring={restoreBackupMutation.isPending}
             onCreate={() => createBackupMutation.mutate()}
-            onRestore={setRestoreTarget}
+            onRestore={(backup) => {
+              setRestoreConfirmText("");
+              setRestoreTarget(backup);
+            }}
           />
         </TabsContent>
       </Tabs>
@@ -193,16 +203,28 @@ export function SettingsPage(): JSX.Element {
       <ConfirmDialog
         open={Boolean(restoreTarget)}
         title="恢复数据备份"
-        description={`确认恢复备份 "${restoreTarget?.filename ?? ""}"? 当前数据库数据会被备份内容替换。`}
+        description={`确认恢复备份 "${restoreTarget?.filename ?? ""}"? 当前数据库数据会被备份内容替换。请在下方输入完整文件名以确认。`}
         confirmText="恢复"
         loading={restoreBackupMutation.isPending}
+        confirmDisabled={!restoreFilenameMatched}
         onOpenChange={(open) => {
-          if (!open) setRestoreTarget(null);
+          if (!open) {
+            setRestoreTarget(null);
+            setRestoreConfirmText("");
+          }
         }}
         onConfirm={() => {
-          if (restoreTarget) restoreBackupMutation.mutate(restoreTarget);
+          if (restoreTarget && restoreFilenameMatched) restoreBackupMutation.mutate(restoreTarget);
         }}
-      />
+      >
+        <Input
+          value={restoreConfirmText}
+          onChange={(event) => setRestoreConfirmText(event.target.value)}
+          placeholder={restoreTarget?.filename ?? "输入备份文件名"}
+          autoComplete="off"
+          spellCheck={false}
+        />
+      </ConfirmDialog>
     </div>
   );
 }
@@ -253,7 +275,7 @@ function BackupSettingsPanel({
           <p className="text-sm text-muted-foreground">创建数据库快照并按历史备份恢复数据</p>
         </div>
         <Button size="sm" onClick={onCreate} loading={creating}>
-          <DatabaseBackup className="h-4 w-4 mr-1" />
+          <DatabaseBackup className="mr-1 h-4 w-4" />
           创建备份
         </Button>
       </div>
@@ -267,13 +289,13 @@ function BackupSettingsPanel({
               <div className="min-w-0 space-y-2">
                 <div className="truncate font-mono text-sm font-semibold">{backup.filename}</div>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  <span>{formatBackupDate(backup.created_at)}</span>
-                  <span>{formatBackupSize(backup.size_bytes)}</span>
+                  <span>{formatDateTime(backup.created_at)}</span>
+                  <span>{formatByteSize(backup.size_bytes)}</span>
                   <span>{formatBackupTableCounts(backup.table_counts)}</span>
                 </div>
               </div>
               <Button type="button" variant="outline" size="sm" onClick={() => onRestore(backup)} disabled={restoring}>
-                <RotateCcw className="h-4 w-4 mr-1" />
+                <RotateCcw className="mr-1 h-4 w-4" />
                 恢复
               </Button>
             </div>
@@ -305,22 +327,6 @@ function BackupListSkeleton(): JSX.Element {
       ))}
     </div>
   );
-}
-
-/**
- * 格式化备份时间。
- */
-function formatBackupDate(value: string): string {
-  return new Date(value).toLocaleString();
-}
-
-/**
- * 格式化备份文件大小。
- */
-function formatBackupSize(sizeBytes: number): string {
-  if (sizeBytes < 1024) return `${sizeBytes} B`;
-  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
-  return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 /**

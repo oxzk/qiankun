@@ -1,7 +1,8 @@
+import { memo } from "react";
 import { Pencil, Play } from "lucide-react";
 import { EmptyState, TooltipIconButton } from "@/components/common";
 import { DataTableShell } from "@/components/data/data-table-shell";
-import { Skeleton } from "@/components/ui/skeleton";
+import { TableSkeleton } from "@/components/data/table-skeleton";
 import { Switch } from "@/components/ui/switch";
 import type { ProviderInfo } from "@/types";
 
@@ -36,6 +37,83 @@ export interface ProviderTableProps {
   onEdit: (provider: ProviderInfo) => void;
 }
 
+interface ProviderRowProps {
+  /**
+   * Provider 数据。
+   */
+  provider: ProviderInfo;
+  /**
+   * 启停是否进行中。
+   */
+  togglePending: boolean;
+  /**
+   * 测试是否进行中。
+   */
+  testPending: boolean;
+  /**
+   * 启停回调。
+   */
+  onToggle: (name: string, enabled: boolean) => void;
+  /**
+   * 测试运行回调。
+   */
+  onTestRun: (provider: ProviderInfo) => void;
+  /**
+   * 编辑回调。
+   */
+  onEdit: (provider: ProviderInfo) => void;
+}
+
+const PROVIDER_SKELETON_COLUMNS = [
+  { widthClass: "w-24" },
+  { widthClass: "w-16" },
+  { widthClass: "w-16", align: "right" as const },
+];
+
+/**
+ * Provider 行。
+ */
+const ProviderRow = memo(function ProviderRow({
+  provider,
+  togglePending,
+  testPending,
+  onToggle,
+  onTestRun,
+  onEdit,
+}: ProviderRowProps): JSX.Element {
+  return (
+    <tr>
+      <td>
+        <span className="inline-block max-w-36 truncate font-mono font-semibold">{provider.name}</span>
+      </td>
+      <td>
+        <div className="flex items-center">
+          <Switch
+            checked={provider.enabled}
+            onCheckedChange={(checked) => onToggle(provider.name, checked)}
+            disabled={togglePending}
+          />
+        </div>
+      </td>
+      <td className="text-right">
+        <div className="flex justify-end gap-1">
+          <TooltipIconButton
+            label="测试运行"
+            variant="ghost"
+            onClick={() => onTestRun(provider)}
+            disabled={testPending || !provider.enabled}
+          >
+            <Play className="h-4 w-4" />
+          </TooltipIconButton>
+          <TooltipIconButton label="编辑" variant="ghost" onClick={() => onEdit(provider)}>
+            <Pencil className="h-4 w-4" />
+          </TooltipIconButton>
+        </div>
+      </td>
+    </tr>
+  );
+});
+
 /**
  * Provider 表格。
  */
@@ -59,42 +137,18 @@ export function ProviderTable({
           </tr>
         </thead>
         <tbody>
-          {loading ? <ProviderTableSkeleton /> : null}
-          {providers.map((provider) => {
-            const togglePending = pendingToggleName === provider.name;
-            const testPending = pendingTestName === provider.name;
-            return (
-              <tr key={provider.name}>
-                <td>
-                  <span className="inline-block max-w-36 truncate font-mono font-semibold">{provider.name}</span>
-                </td>
-                <td>
-                  <div className="flex items-center">
-                    <Switch
-                      checked={provider.enabled}
-                      onCheckedChange={(checked) => onToggle(provider.name, checked)}
-                      disabled={togglePending}
-                    />
-                  </div>
-                </td>
-                <td className="text-right">
-                  <div className="flex justify-end gap-1">
-                    <TooltipIconButton
-                      label="测试运行"
-                      variant="ghost"
-                      onClick={() => onTestRun(provider)}
-                      disabled={testPending || !provider.enabled}
-                    >
-                      <Play className="h-4 w-4" />
-                    </TooltipIconButton>
-                    <TooltipIconButton label="编辑" variant="ghost" onClick={() => onEdit(provider)}>
-                      <Pencil className="h-4 w-4" />
-                    </TooltipIconButton>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
+          {loading ? <TableSkeleton columns={PROVIDER_SKELETON_COLUMNS} rows={5} /> : null}
+          {providers.map((provider) => (
+            <ProviderRow
+              key={provider.name}
+              provider={provider}
+              togglePending={pendingToggleName === provider.name}
+              testPending={pendingTestName === provider.name}
+              onToggle={onToggle}
+              onTestRun={onTestRun}
+              onEdit={onEdit}
+            />
+          ))}
           {!loading && !providers.length ? (
             <tr>
               <td colSpan={3}>
@@ -105,28 +159,5 @@ export function ProviderTable({
         </tbody>
       </table>
     </DataTableShell>
-  );
-}
-
-/**
- * Provider 表格骨架屏。
- */
-function ProviderTableSkeleton(): JSX.Element {
-  return (
-    <>
-      {Array.from({ length: 5 }).map((_, index) => (
-        <tr key={index}>
-          <td>
-            <Skeleton className="h-6 w-24" />
-          </td>
-          <td>
-            <Skeleton className="h-6 w-16" />
-          </td>
-          <td className="text-right">
-            <Skeleton className="ml-auto h-6 w-16" />
-          </td>
-        </tr>
-      ))}
-    </>
   );
 }

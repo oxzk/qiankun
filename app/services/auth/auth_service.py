@@ -8,7 +8,6 @@ from app.infrastructure.database.unit_of_work import UnitOfWork, UnitOfWorkFacto
 from app.infrastructure.security.password_hasher import PasswordHasher
 from app.infrastructure.security.token_service import TokenService
 from app.schemas.auth import ChangePasswordRequest, LoginRequest
-from app.services.auth.login_rate_limiter import LoginRateLimiter
 from app.services.auth.results import TokenResult
 from app.shared.errors import AppError
 
@@ -20,20 +19,15 @@ class AuthService:
         self,
         password_hasher: PasswordHasher | None = None,
         token_service: TokenService | None = None,
-        rate_limiter: LoginRateLimiter | None = None,
         uow_factory: UnitOfWorkFactory = UnitOfWork,
     ) -> None:
         """初始化认证业务服务依赖。"""
         self._password_hasher = password_hasher or PasswordHasher()
         self._token_service = token_service or TokenService()
-        self._rate_limiter = rate_limiter or LoginRateLimiter()
         self._uow_factory = uow_factory
 
-    async def login(self, payload: LoginRequest, client_key: str | None = None) -> TokenResult:
+    async def login(self, payload: LoginRequest) -> TokenResult:
         """校验用户名密码并签发访问令牌。"""
-        rate_key = self._rate_key(payload.username, client_key)
-        self._rate_limiter.ensure_allowed(rate_key)
-
         user = await self.get_user_by_username(payload.username)
         password_ok = False
         if user is not None:
@@ -42,10 +36,8 @@ class AuthService:
                 user.password,
             )
         if user is None or not password_ok:
-            self._rate_limiter.record_failure(rate_key)
             raise AppError("用户名或密码错误", status_code=401)
 
-        self._rate_limiter.reset(rate_key)
         token = self._token_service.create_access_token(user.username)
         return TokenResult(
             access_token=token,
@@ -72,11 +64,3 @@ class AuthService:
             user.password = await self._password_hasher.ahash_password(payload.new_password)
             await uow.users.update(user)
             await uow.commit()
-
-    @staticmethod
-    def _rate_key(username: str, client_key: str | None) -> str:
-        """构造登录限流键。"""
-        normalized_user = username.strip().lower()
-        if client_key:
-            return f"{normalized_user}|{client_key}"
-        return normalized_user

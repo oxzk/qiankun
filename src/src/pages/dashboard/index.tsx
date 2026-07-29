@@ -1,36 +1,42 @@
 import { useMemo } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, CheckCircle2, Clock3, PlayCircle, TimerOff } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { EmptyState, SectionHeader } from "@/components/common";
 import { DataTableShell } from "@/components/data/data-table-shell";
 import { TableEmptyState } from "@/components/data/table-empty-state";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { executionsApi, getErrorMessage, statsApi, tasksApi } from "@/lib/api";
+import { formatDateTime, formatDurationMs } from "@/lib/datetime";
+import { queryStaleTime } from "@/lib/query-options";
 import { queryKeys } from "@/lib/query-keys";
-import { formatDateTime, formatDuration } from "@/lib/datetime";
 import { executionStatusLabel, executionStatusVariant } from "@/pages/executions/status";
 
 /**
  * 运维概览页面。
  */
 export function DashboardPage(): JSX.Element {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
   const statsQuery = useQuery({
     queryKey: queryKeys.stats.taskStats,
-    queryFn: statsApi.getStats,
-    staleTime: 15_000,
+    queryFn: ({ signal }) => statsApi.getStats(signal),
+    staleTime: queryStaleTime.stats,
   });
   const tasksQuery = useQuery({
     queryKey: queryKeys.tasks.dashboard,
-    queryFn: () => tasksApi.list({ page: 1, page_size: 6 }),
-    staleTime: 10_000,
+    queryFn: ({ signal }) => tasksApi.list({ page: 1, page_size: 6 }, signal),
+    staleTime: queryStaleTime.list,
     placeholderData: keepPreviousData,
   });
   const executionsQuery = useQuery({
     queryKey: queryKeys.executions.dashboard,
-    queryFn: () => executionsApi.list({ page: 1, page_size: 8 }),
-    staleTime: 10_000,
+    queryFn: ({ signal }) => executionsApi.list({ page: 1, page_size: 8 }, signal),
+    staleTime: queryStaleTime.list,
     placeholderData: keepPreviousData,
   });
   const loading = statsQuery.isFetching || tasksQuery.isFetching || executionsQuery.isFetching;
@@ -39,9 +45,9 @@ export function DashboardPage(): JSX.Element {
    * 刷新概览数据。
    */
   function refresh(): void {
-    void statsQuery.refetch();
-    void tasksQuery.refetch();
-    void executionsQuery.refetch();
+    void queryClient.invalidateQueries({ queryKey: queryKeys.stats.taskStats });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.dashboard });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.executions.dashboard });
   }
 
   const stats = statsQuery.data;
@@ -89,14 +95,22 @@ export function DashboardPage(): JSX.Element {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">近期任务</CardTitle>
+            <Button type="button" size="sm" variant="ghost" onClick={() => navigate("/tasks")}>
+              查看全部
+            </Button>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
               {tasksQuery.isLoading ? <DashboardTaskSkeleton /> : null}
               {(tasksQuery.data?.items ?? []).map((task) => (
-                <div key={task.id} className="rounded-lg border p-3">
+                <button
+                  key={task.id}
+                  type="button"
+                  className="w-full rounded-lg border p-3 text-left transition hover:bg-muted/40"
+                  onClick={() => navigate(`/tasks?q=${encodeURIComponent(task.name)}`)}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">{task.name}</div>
@@ -108,7 +122,7 @@ export function DashboardPage(): JSX.Element {
                     <Clock3 className="h-3.5 w-3.5" />
                     下次运行: {formatDateTime(task.next_run_time)}
                   </div>
-                </div>
+                </button>
               ))}
               {!tasksQuery.isLoading && !tasksQuery.data?.items.length ? <EmptyState title="暂无任务" description="创建任务后会显示在这里。" /> : null}
             </div>
@@ -116,8 +130,11 @@ export function DashboardPage(): JSX.Element {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">最近执行</CardTitle>
+            <Button type="button" size="sm" variant="ghost" onClick={() => navigate("/executions")}>
+              查看全部
+            </Button>
           </CardHeader>
           <CardContent>
             <DataTableShell>
@@ -133,7 +150,11 @@ export function DashboardPage(): JSX.Element {
                 <tbody>
                   {executionsQuery.isLoading ? <DashboardExecutionSkeleton /> : null}
                   {(executionsQuery.data?.items ?? []).map((item) => (
-                    <tr key={item.id}>
+                    <tr
+                      key={item.id}
+                      className="cursor-pointer hover:bg-muted/40"
+                      onClick={() => navigate(`/executions?task_id=${item.task_id}`)}
+                    >
                       <td className="max-w-[14rem] truncate">
                         {item.task_name || item.provider_name || `#${item.task_id}`}
                       </td>
@@ -143,7 +164,7 @@ export function DashboardPage(): JSX.Element {
                         </Badge>
                       </td>
                       <td>{formatDateTime(item.started_at)}</td>
-                      <td>{formatDuration(item.duration_ms !== null ? Math.round(item.duration_ms / 1000) : null)}</td>
+                      <td>{formatDurationMs(item.duration_ms)}</td>
                     </tr>
                   ))}
                 </tbody>

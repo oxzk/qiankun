@@ -20,7 +20,7 @@ class Settings(BaseSettings):
         default="mysql://root:password@127.0.0.1:3306/qiankun",
         description="MySQL 连接地址",
     )
-    database_ssl_enabled: bool = Field(default=False, description="是否启用数据库 SSL")
+    database_ssl_enabled: bool = Field(default=True, description="是否启用数据库 SSL")
     database_pool_size: int = Field(default=5, ge=1, description="数据库连接池大小")
     database_max_overflow: int = Field(default=10, ge=0, description="数据库连接池最大溢出数")
     jwt_secret_key: str = Field(default=DEFAULT_JWT_SECRET, description="JWT 签名密钥")
@@ -35,12 +35,6 @@ class Settings(BaseSettings):
         default=10,
         ge=1,
         description="单实例最大并发任务数",
-    )
-    login_rate_limit_attempts: int = Field(default=5, ge=1, description="登录失败次数上限")
-    login_rate_limit_window_seconds: int = Field(
-        default=300,
-        ge=1,
-        description="登录失败计数窗口秒数",
     )
     provider_code_sandbox: bool = Field(
         default=True,

@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.shared.datetime import utc_now
 from app.shared.enums import TriggerType
+
+HeadlessMode = Literal["false", "true", "virtual"]
+"""浏览器无头模式: false 有界面, true 无头, virtual 虚拟显示。"""
+
+HEADLESS_MODES: frozenset[str] = frozenset({"false", "true", "virtual"})
+"""合法 headless 配置值集合。"""
 
 
 class ProviderConfig(BaseModel):
@@ -19,9 +25,23 @@ class ProviderConfig(BaseModel):
 class BrowserProviderConfig(ProviderConfig):
     """浏览器型 Provider 通用配置。"""
 
-    headless: bool = Field(default=True, description="是否使用无头模式")
+    headless: HeadlessMode = Field(
+        default="true",
+        description="无头模式: false|true|virtual",
+    )
     proxy: str | None = Field(default=None, description="浏览器代理地址")
     user_data_dir: str | None = Field(default=None, description="浏览器用户数据目录")
+
+    @field_validator("headless", mode="before")
+    @classmethod
+    def normalize_headless(cls, value: object) -> HeadlessMode:
+        """规范化 headless 配置为 false|true|virtual。"""
+        if value is None:
+            return "true"
+        text = str(value).strip().lower()
+        if text not in HEADLESS_MODES:
+            raise ValueError("headless 仅支持 false|true|virtual")
+        return text  # type: ignore[return-value]
 
     @field_validator("proxy", "user_data_dir", mode="before")
     @classmethod
@@ -31,6 +51,12 @@ class BrowserProviderConfig(ProviderConfig):
             return None
         text = str(value).strip()
         return text or None
+
+    def resolve_headless(self) -> bool | Literal["virtual"]:
+        """将 headless 配置解析为 Camoufox 启动参数。"""
+        if self.headless == "virtual":
+            return "virtual"
+        return self.headless == "true"
 
 
 class ProviderContext(BaseModel):

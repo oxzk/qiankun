@@ -22,7 +22,7 @@ export interface HeaderProps {
 export function Header({ dark, onToggleTheme }: HeaderProps): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout } = useSession();
+  const { logout, user } = useSession();
   const activeRoute = resolveMenuRoute(location.pathname);
 
   return (
@@ -30,6 +30,11 @@ export function Header({ dark, onToggleTheme }: HeaderProps): JSX.Element {
       <div className="relative mx-auto flex h-16 max-w-[1400px] items-center justify-between px-4 md:px-8">
         <div className="flex min-w-0 items-center gap-3">
           <img src="/logo.svg" className="h-9 w-9 rounded-lg shrink-0" alt="QianKun Logo" />
+          {user ? (
+            <span className="hidden truncate text-sm text-muted-foreground sm:inline" title={user.username}>
+              {user.username}
+            </span>
+          ) : null}
         </div>
         <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 md:flex" aria-label="主菜单">
           {menuRoutes.map((route) => {
@@ -78,6 +83,7 @@ export function Header({ dark, onToggleTheme }: HeaderProps): JSX.Element {
               variant={activeRoute?.path === route.path ? "default" : "ghost"}
               className="h-8 rounded-full px-3"
               aria-current={activeRoute?.path === route.path ? "page" : undefined}
+              aria-label={route.label}
               onClick={() => navigate(route.path)}
             >
               <Icon className="h-4 w-4" />

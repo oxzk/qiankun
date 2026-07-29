@@ -70,8 +70,6 @@ cp .env.example .env
 | `CORS_ORIGINS` | 允许跨域的前端来源 JSON 数组, 默认空 |
 | `SCHEDULER_INTERVAL_SECONDS` | 调度轮询间隔秒数, 默认 `5` |
 | `SCHEDULER_MAX_CONCURRENT_TASKS` | 单实例最大并发任务数, 默认 `10` |
-| `LOGIN_RATE_LIMIT_ATTEMPTS` | 登录失败次数上限, 默认 `5` |
-| `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | 登录失败计数窗口秒数, 默认 `300` |
 | `PROVIDER_CODE_SANDBOX` | 是否启用动态 Provider 代码沙箱, 默认 `true` |
 | `HTTP_RETRY_ATTEMPTS` | HTTP Provider 请求重试次数 |
 | `HTTP_RETRY_DELAY_SECONDS` | HTTP Provider 初始重试间隔 |
@@ -94,7 +92,7 @@ uv run alembic -c alembic.ini upgrade head
 启动 API 服务:
 
 ```bash
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 服务启动后可访问:

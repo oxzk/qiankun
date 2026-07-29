@@ -5,6 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>QianKun</title>
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem("qiankun.theme");
+          if (theme === "dark") document.documentElement.classList.add("dark");
+          else if (theme === "light") document.documentElement.classList.remove("dark");
+        } catch (error) {
+          /* 忽略隐私模式下的存储异常 */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

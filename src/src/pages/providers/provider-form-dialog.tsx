@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
-import { Field } from "@/components/common";
+import { useEffect } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Controller, useForm, type Resolver } from "react-hook-form";
+import { CodeEditor, Field } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import { useToast } from "@/hooks/use-toast";
+import { providerFormSchema, toProviderPayload, type ProviderFormValues } from "@/lib/forms";
 import type { ProviderInfo, ProviderPayload } from "@/types";
 
 export interface ProviderFormDialogProps {
@@ -32,6 +33,24 @@ export interface ProviderFormDialogProps {
 }
 
 /**
+ * 构建执行器表单默认值。
+ */
+function toFormValues(provider: ProviderInfo | null): ProviderFormValues {
+  if (!provider) {
+    return {
+      name: "",
+      code: "",
+      enabled: true,
+    };
+  }
+  return {
+    name: provider.name,
+    code: provider.code,
+    enabled: provider.enabled,
+  };
+}
+
+/**
  * Provider 表单弹窗。
  */
 export function ProviderFormDialog({
@@ -41,43 +60,22 @@ export function ProviderFormDialog({
   onOpenChange,
   onSubmit,
 }: ProviderFormDialogProps): JSX.Element {
-  const [name, setName] = useState("");
-  const [code, setCode] = useState("");
-  const [enabled, setEnabled] = useState(true);
-  const { toast } = useToast();
+  const form = useForm<ProviderFormValues>({
+    resolver: zodResolver(providerFormSchema) as Resolver<ProviderFormValues>,
+    defaultValues: toFormValues(provider),
+    mode: "onChange",
+  });
 
   useEffect(() => {
     if (!open) return;
-    if (provider) {
-      setName(provider.name);
-      setCode(provider.code);
-      setEnabled(provider.enabled);
-      return;
-    }
-    setName("");
-    setCode("");
-    setEnabled(true);
-  }, [open, provider]);
+    form.reset(toFormValues(provider));
+  }, [form, open, provider]);
 
   /**
    * 提交 Provider 表单。
    */
-  function handleSubmit(event: React.FormEvent): void {
-    event.preventDefault();
-    if (!name.trim()) {
-      toast({ title: "执行器名称不能为空", variant: "destructive" });
-      return;
-    }
-    if (!code.trim()) {
-      toast({ title: "Provider 代码不能为空", variant: "destructive" });
-      return;
-    }
-
-    onSubmit({
-      name: name.trim(),
-      code,
-      enabled,
-    });
+  function handleSubmit(values: ProviderFormValues): void {
+    onSubmit(toProviderPayload(values));
   }
 
   return (
@@ -86,12 +84,17 @@ export function ProviderFormDialog({
         <DialogHeader>
           <DialogTitle>{provider ? "编辑执行器" : "新建执行器"}</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
           <div className="grid gap-4">
-            <Field label="执行器名称" required inline>
+            <Field
+              label="执行器名称"
+              required
+              inline
+              error={Boolean(form.formState.errors.name)}
+              errorMessage={form.formState.errors.name?.message}
+            >
               <Input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
+                {...form.register("name")}
                 placeholder="例如: template 或 custom-template"
                 required
                 disabled={Boolean(provider)}
@@ -100,19 +103,36 @@ export function ProviderFormDialog({
             <div className="grid gap-1.5">
               <div className="grid h-9 grid-cols-[6rem_minmax(0,1fr)] items-center gap-2">
                 <span className="field-label whitespace-nowrap">状态</span>
-                <Switch checked={enabled} onCheckedChange={setEnabled} className="justify-self-start" />
+                <Controller
+                  control={form.control}
+                  name="enabled"
+                  render={({ field }) => (
+                    <Switch checked={field.value} onCheckedChange={field.onChange} className="justify-self-start" />
+                  )}
+                />
               </div>
             </div>
           </div>
 
-          <Field label="Provider 代码" required>
-            <Textarea
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              placeholder={`例如:\nclass TemplateProvider(BaseProvider):\n    name = "template"\n    config_schema = ProviderConfig\n\n    async def execute(self, config):\n        return ProviderResult.ok("执行成功")`}
-              rows={16}
-              className="font-mono text-xs"
-              required
+          <Field
+            label="Provider 代码"
+            required
+            error={Boolean(form.formState.errors.code)}
+            errorMessage={form.formState.errors.code?.message}
+          >
+            <Controller
+              control={form.control}
+              name="code"
+              render={({ field }) => (
+                <CodeEditor
+                  value={field.value}
+                  onChange={field.onChange}
+                  placeholder={`例如:\nclass TemplateProvider(BaseProvider):\n    name = "template"\n    config_schema = ProviderConfig\n\n    async def execute(self, config):\n        return ProviderResult.ok("执行成功")`}
+                  rows={16}
+                  required
+                  aria-label="Provider 代码"
+                />
+              )}
             />
           </Field>
 

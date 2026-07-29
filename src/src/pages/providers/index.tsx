@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw } from "lucide-react";
 import { EmptyState, SectionHeader } from "@/components/common";
 import { PaginationBar } from "@/components/data/pagination-bar";
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { usePagination } from "@/hooks/use-pagination";
 import { useToastMutation } from "@/hooks/use-toast-mutation";
 import { getErrorMessage, providersApi } from "@/lib/api";
+import { queryStaleTime } from "@/lib/query-options";
 import { queryKeys } from "@/lib/query-keys";
 import type { JsonRecord, ProviderInfo, ProviderPayload, ProviderResult } from "@/types";
 import { ProviderFormDialog } from "./provider-form-dialog";
@@ -43,11 +44,12 @@ export function ProvidersPage(): JSX.Element {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<ProviderInfo | null>(null);
   const [testingProvider, setTestingProvider] = useState<ProviderInfo | null>(null);
+  const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: queryKeys.providers.list({ page }),
-    queryFn: () => providersApi.list({ page, page_size: 20 }),
-    staleTime: 60_000,
+    queryFn: ({ signal }) => providersApi.list({ page, page_size: 20 }, signal),
+    staleTime: queryStaleTime.catalog,
     placeholderData: keepPreviousData,
   });
 
@@ -58,7 +60,7 @@ export function ProvidersPage(): JSX.Element {
     },
     successTitle: () => (editingProvider ? "执行器已更新" : "执行器已创建"),
     errorTitle: "保存失败",
-    invalidate: [queryKeys.providers.root, queryKeys.tasks.root],
+    invalidate: [queryKeys.providers.root, queryKeys.providers.options, queryKeys.tasks.root],
     onSuccess: () => {
       setDialogOpen(false);
     },
@@ -68,14 +70,14 @@ export function ProvidersPage(): JSX.Element {
     mutationFn: ({ name, enabled }) => (enabled ? providersApi.enable(name) : providersApi.disable(name)),
     successTitle: "执行器状态已更新",
     errorTitle: "操作失败",
-    invalidate: [queryKeys.providers.root, queryKeys.tasks.root],
+    invalidate: [queryKeys.providers.root, queryKeys.providers.options, queryKeys.tasks.root],
   });
 
   const syncMutation = useToastMutation<boolean, void>({
     mutationFn: () => providersApi.sync(),
     successTitle: "执行器已同步",
     errorTitle: "同步失败",
-    invalidate: [queryKeys.providers.root, queryKeys.tasks.root],
+    invalidate: [queryKeys.providers.root, queryKeys.providers.options, queryKeys.tasks.root],
   });
 
   const testRunMutation = useToastMutation<ProviderResult, ProviderTestRunVariables>({
@@ -99,13 +101,21 @@ export function ProvidersPage(): JSX.Element {
     setDialogOpen(true);
   }
 
-  /**
-   * 打开编辑弹窗。
-   */
-  function openEdit(provider: ProviderInfo): void {
+  const openEdit = useCallback((provider: ProviderInfo) => {
     setEditingProvider(provider);
     setDialogOpen(true);
-  }
+  }, []);
+
+  const handleToggle = useCallback(
+    (name: string, enabled: boolean) => {
+      toggleMutation.mutate({ name, enabled });
+    },
+    [toggleMutation],
+  );
+
+  const handleTestRun = useCallback((provider: ProviderInfo) => {
+    setTestingProvider(provider);
+  }, []);
 
   const providers = query.data?.items ?? [];
   const pendingToggleName =
@@ -119,15 +129,17 @@ export function ProvidersPage(): JSX.Element {
         title="执行器管理"
         description="管理和配置系统内置与自定义执行器 (Providers)。您可以新建、编辑或启停执行器。"
         loading={query.isFetching || syncMutation.isPending}
-        onRefresh={() => void query.refetch()}
+        onRefresh={() => {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.providers.root });
+        }}
         actions={
           <>
             <Button size="sm" variant="outline" onClick={() => syncMutation.mutate()} loading={syncMutation.isPending}>
-              <RefreshCw className="h-4 w-4 mr-1" />
+              <RefreshCw className="mr-1 h-4 w-4" />
               同步执行器
             </Button>
             <Button size="sm" onClick={openCreate}>
-              <Plus className="h-4 w-4 mr-1" />
+              <Plus className="mr-1 h-4 w-4" />
               新建执行器
             </Button>
           </>
@@ -141,8 +153,8 @@ export function ProvidersPage(): JSX.Element {
         loading={query.isLoading}
         pendingToggleName={pendingToggleName}
         pendingTestName={pendingTestName}
-        onToggle={(name, enabled) => toggleMutation.mutate({ name, enabled })}
-        onTestRun={(provider) => setTestingProvider(provider)}
+        onToggle={handleToggle}
+        onTestRun={handleTestRun}
         onEdit={openEdit}
       />
 

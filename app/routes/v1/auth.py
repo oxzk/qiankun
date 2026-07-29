@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 
 from app.bootstrap.dependencies import CurrentUserDep, get_auth_service
 from app.schemas.auth import ChangePasswordRequest, LoginRequest, TokenResponse, UserOut
@@ -17,12 +17,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/login", response_model=APIResponse[TokenResponse])
 async def login(
     payload: LoginRequest,
-    request: Request,
     service: AuthService = Depends(get_auth_service),
 ) -> APIResponse[TokenResponse]:
     """用户登录。"""
-    client_key = request.client.host if request.client is not None else None
-    return await service.login(payload, client_key=client_key)
+    return await service.login(payload)
 
 
 @router.get("/me", response_model=APIResponse[UserOut])

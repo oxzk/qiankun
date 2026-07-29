@@ -7,7 +7,6 @@ from app.infrastructure.security.password_hasher import PasswordHasher
 from app.infrastructure.security.token_service import TokenService
 from app.infrastructure.database.unit_of_work import UnitOfWork
 from app.services.auth.auth_service import AuthService
-from app.services.auth.login_rate_limiter import LoginRateLimiter
 from app.services.backups.backup_service import BackupService
 from app.services.executions.composition import build_execution_services
 from app.services.notifications.composition import build_notification_services
@@ -25,11 +24,9 @@ class ApplicationContainer:
         self.requester = Requester()
         self.password_hasher = PasswordHasher()
         self.token_service = TokenService()
-        self.login_rate_limiter = LoginRateLimiter()
         self.auth_service = AuthService(
             password_hasher=self.password_hasher,
             token_service=self.token_service,
-            rate_limiter=self.login_rate_limiter,
             uow_factory=self.uow_factory,
         )
         self.backup_service = BackupService(uow_factory=self.uow_factory)

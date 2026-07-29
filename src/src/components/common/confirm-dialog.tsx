@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Button, type ButtonProps } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -27,6 +28,14 @@ export interface ConfirmDialogProps {
    */
   loading?: boolean;
   /**
+   * 是否禁用确认按钮。
+   */
+  confirmDisabled?: boolean;
+  /**
+   * 附加确认内容。
+   */
+  children?: ReactNode;
+  /**
    * 弹窗开关回调。
    */
   onOpenChange: (open: boolean) => void;
@@ -46,6 +55,8 @@ export function ConfirmDialog({
   confirmText = "确认",
   confirmVariant = "destructive",
   loading = false,
+  confirmDisabled = false,
+  children,
   onOpenChange,
   onConfirm,
 }: ConfirmDialogProps): JSX.Element {
@@ -56,11 +67,18 @@ export function ConfirmDialog({
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">{description}</p>
+        {children ? <div className="space-y-2">{children}</div> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button type="button" variant={confirmVariant} loading={loading} onClick={onConfirm}>
+          <Button
+            type="button"
+            variant={confirmVariant}
+            loading={loading}
+            disabled={confirmDisabled}
+            onClick={onConfirm}
+          >
             {confirmText}
           </Button>
         </div>

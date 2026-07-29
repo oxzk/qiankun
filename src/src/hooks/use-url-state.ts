@@ -30,9 +30,36 @@ export function useUrlStringParam(name: string, defaultValue = ""): readonly [st
 }
 
 /**
+ * 批量更新 URL 查询参数。
+ */
+export function useUrlParamsWriter(): (updates: Record<string, string | null | undefined>) => void {
+  const [, setSearchParams] = useSearchParams();
+
+  return useCallback(
+    (updates: Record<string, string | null | undefined>) => {
+      setSearchParams(
+        (current) => {
+          const nextParams = new URLSearchParams(current);
+          Object.entries(updates).forEach(([key, value]) => {
+            if (value === null || value === undefined || value === "") {
+              nextParams.delete(key);
+            } else {
+              nextParams.set(key, value);
+            }
+          });
+          return nextParams;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+}
+
+/**
  * 管理 URL 分页页码, 并在筛选依赖变化时回到第一页。
  */
-export function useUrlPage(resetDeps: readonly unknown[] = []): {
+export function usePagination(resetDeps: readonly unknown[] = []): {
   page: number;
   setPage: (page: number | ((page: number) => number)) => void;
 } {

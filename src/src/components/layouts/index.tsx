@@ -13,10 +13,20 @@ export interface LayoutProps {
 }
 
 /**
+ * 读取初始主题, 优先 localStorage, 否则跟随系统。
+ */
+function readInitialDark(): boolean {
+  const theme = storage.getTheme();
+  if (theme === "dark") return true;
+  if (theme === "light") return false;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+/**
  * 全局页面布局。
  */
 export function Layout({ children }: LayoutProps): JSX.Element {
-  const [dark, setDark] = useState(() => storage.getTheme() === "dark");
+  const [dark, setDark] = useState(readInitialDark);
   const location = useLocation();
 
   useEffect(() => {

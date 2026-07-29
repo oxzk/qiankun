@@ -60,6 +60,7 @@ class BaseBrowserProvider(BaseProvider):
         self._clean_screenshot_dir()
         browser = BaseCamoufox()
         try:
+            headless = provider_config.resolve_headless()
             self.log(
                 "启动 Camoufox: "
                 f"target={self._format_browser_target(provider_config)}, "
@@ -67,7 +68,7 @@ class BaseBrowserProvider(BaseProvider):
                 f"user_data_dir={provider_config.user_data_dir or '禁用'}"
             )
             await browser.launch(
-                headless=provider_config.headless,
+                headless=headless,
                 proxy=provider_config.proxy,
                 user_data_dir=provider_config.user_data_dir,
                 **dict(self.launch_options),
@@ -196,6 +197,75 @@ class BaseBrowserProvider(BaseProvider):
             return True
         self.log("Turnstile 验证未通过")
         return False
+
+    async def open_url(
+        self,
+        browser: BaseCamoufox,
+        url: str,
+        *,
+        wait_until: str = "domcontentloaded",
+        wait_load_state: str | None = "load",
+    ) -> str:
+        """打开指定地址并等待页面加载完成, 返回当前 URL。
+
+        Args:
+            browser: 已启动的浏览器实例.
+            url: 目标地址.
+            wait_until: ``goto`` 完成条件, 默认 ``domcontentloaded``.
+            wait_load_state: 额外等待的加载状态; 传 ``None`` 跳过.
+        """
+        self.log(f"打开页面: {url}")
+        await browser.goto(url, wait_until=wait_until)
+        if wait_load_state:
+            await browser.wait_for_load_state(wait_load_state)
+        current = browser.current_url()
+        self.log(f"页面已加载: {current}")
+        return current
+
+    async def open_url_and_check(
+        self,
+        browser: BaseCamoufox,
+        url: str,
+        keyword: str,
+        *,
+        wait_until: str = "domcontentloaded",
+        wait_load_state: str | None = "networkidle",
+        timeout_ms: int = 15_000,
+        case_insensitive: bool = True,
+    ) -> bool:
+        """打开指定地址, 再通过 ``wait_for_url`` 判断当前 URL 是否包含关键词。
+
+        Args:
+            browser: 已启动的浏览器实例.
+            url: 目标地址.
+            keyword: 加载完成后 URL 中需包含的关键词.
+            wait_until: ``goto`` 完成条件.
+            wait_load_state: 额外等待的加载状态, 默认 ``networkidle``; 传 ``None`` 跳过.
+            timeout_ms: 等待 URL 包含关键词的最长毫秒数.
+            case_insensitive: 是否忽略大小写, 默认 True.
+        """
+        await self.open_url(
+            browser,
+            url,
+            wait_until=wait_until,
+            wait_load_state=wait_load_state,
+        )
+        needle = keyword.lower() if case_insensitive else keyword
+
+        def _match(current: str) -> bool:
+            haystack = current.lower() if case_insensitive else current
+            return needle in haystack
+
+        try:
+            await browser.wait_for_url(_match, timeout=timeout_ms)
+            matched = True
+        except Exception as exc:
+            if type(exc).__name__ not in {"TimeoutError", "Error", "TargetClosedError"}:
+                self.log(f"wait_for_url 异常: {type(exc).__name__}: {exc}")
+            current = browser.current_url()
+            haystack = current.lower() if case_insensitive else current
+            matched = needle in haystack
+        return matched
 
     async def wait_for_any_selector(
         self,

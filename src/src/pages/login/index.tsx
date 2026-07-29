@@ -2,14 +2,13 @@ import { FormEvent, useId, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { useToastMutation } from "@/hooks/use-toast-mutation";
 import { authApi } from "@/lib/api";
-import { storage } from "@/lib/storage";
 import type { TokenResponse } from "@/types";
 
 export interface LoginPageProps {
   /**
    * 登录成功后的回调。
    */
-  onLogin: () => void;
+  onLogin: (token: TokenResponse) => void;
 }
 
 /**
@@ -30,8 +29,7 @@ export function LoginPage({ onLogin }: LoginPageProps): JSX.Element {
     successTitle: "登录成功",
     errorTitle: "登录失败",
     onSuccess: (token) => {
-      storage.setToken(token.access_token);
-      onLogin();
+      onLogin(token);
     },
   });
 
