@@ -147,7 +147,7 @@ uv run qiankun sync
 运行指定 Provider:
 
 ```bash
-uv run qiankun run-provider probe --config '{"accounts":[{"name":"main","url":"https://example.com"}]}'
+uv run qiankun run probe --config '{"accounts":[{"name":"main","url":"https://example.com"}]}'
 ```
 
 `--config` 必须是 JSON 对象。

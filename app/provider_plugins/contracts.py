@@ -26,7 +26,7 @@ class BrowserProviderConfig(ProviderConfig):
     """浏览器型 Provider 通用配置。"""
 
     headless: HeadlessMode = Field(
-        default="true",
+        default="false",
         description="无头模式: false|true|virtual",
     )
     proxy: str | None = Field(default=None, description="浏览器代理地址")

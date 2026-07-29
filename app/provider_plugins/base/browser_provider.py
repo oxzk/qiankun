@@ -162,6 +162,7 @@ class BaseBrowserProvider(BaseProvider):
         detector = TurnstileDetector(browser.latest_page(), log_func=self.log)
         try:
             snapshot = await detector.detect()
+            self.log(f"Turnstile 检测结果: present={snapshot.present}, visible={snapshot.visible}, rect={snapshot.rect}, source={snapshot.source}, target_kind={snapshot.target_kind}")
         except Exception as exc:
             self.log(f"Turnstile 检测异常: {exc}")
             return False

@@ -4,32 +4,19 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from types import TracebackType
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Literal, Pattern, Protocol
 
 from app.shared.errors import AppError
 
-
-class CamoufoxContext(Protocol):
-    """Camoufox 异步上下文协议。"""
-
-    async def __aenter__(self) -> Any:
-        """进入上下文并返回浏览器或上下文对象。"""
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        """退出上下文并释放浏览器资源。"""
+if TYPE_CHECKING:
+    from playwright.async_api import Browser, BrowserContext, Locator, Page, Response
 
 
 class CamoufoxFactory(Protocol):
     """Camoufox 工厂协议。"""
 
-    def __call__(self, **kwargs: object) -> CamoufoxContext:
-        """创建 Camoufox 异步上下文。"""
+    def __call__(self, **kwargs: object) -> Any:
+        """创建 Camoufox 异步上下文管理器。"""
 
 
 class BaseCamoufox:
@@ -40,29 +27,34 @@ class BaseCamoufox:
 
     def __init__(self) -> None:
         """初始化浏览器运行状态。"""
-        self._camoufox: CamoufoxContext | None = None
-        self._browser: Any | None = None
-        self._context: Any | None = None
-        self._page: Any | None = None
+        self._camoufox: Any | None = None
+        self._browser: Browser | None = None
+        self._context: BrowserContext | None = None
+        self._page: Page | None = None
         self._persistent_context = False
 
     @property
-    def page(self) -> Any:
+    def page(self) -> Page:
         """返回当前页面。"""
         if self._page is None:
             raise AppError("Camoufox 页面未初始化, 请先调用 launch()")
         return self._page
 
-    def set_page(self, page: Any) -> None:
+    def set_page(self, page: Page) -> None:
         """设置当前页面。"""
         self._page = page
 
-    def latest_page(self) -> Any:
+    def latest_page(self) -> Page:
         """返回当前上下文中的最后一个页面。"""
-        pages = self._context.pages if self._context is not None else []
-        if pages:
-            return pages[-1]
+        # 优先从 BrowserContext.pages 取最新页; 回退到已缓存页面.
+        if self._context is not None:
+            pages = list(self._context.pages)
+            if pages:
+                return pages[-1]
         if self._page is not None:
+            pages = list(self._page.context.pages)
+            if pages:
+                return pages[-1]
             return self._page
         raise AppError("Camoufox 页面未初始化, 请先调用 launch()")
 
@@ -82,7 +74,7 @@ class BaseCamoufox:
         user_data_dir: str | Path | None = None,
         context_options: dict[str, object] | None = None,
         **launch_options: object,
-    ) -> Any:
+    ) -> Page:
         """启动 Camoufox 浏览器并创建页面。
 
         Args:
@@ -96,7 +88,10 @@ class BaseCamoufox:
             return self._page
 
         camoufox_class = self._load_camoufox_class()
-        merged_launch_options: dict[str, object] = {"headless": headless}
+        merged_launch_options: dict[str, object] = {
+            "headless": headless,
+            "fonts": ["Arial", "PingFang SC", "Hiragino Sans GB"],
+        }
         if proxy:
             merged_launch_options["proxy"] = {"server": proxy}
         merged_launch_options.update(launch_options)
@@ -113,7 +108,8 @@ class BaseCamoufox:
 
         self._camoufox = camoufox_class(**merged_launch_options)
         browser_or_context = await self._camoufox.__aenter__()
-        if hasattr(browser_or_context, "new_page"):
+        # Browser 与 BrowserContext 都有 new_page; 用 pages 区分上下文对象.
+        if hasattr(browser_or_context, "pages"):
             self._context = browser_or_context
         else:
             self._browser = browser_or_context
@@ -138,7 +134,11 @@ class BaseCamoufox:
         self._browser = None
         self._persistent_context = False
 
-    async def click_and_wait_for_page(self, locator: Any, timeout: float | None = None) -> Any:
+    async def click_and_wait_for_page(
+        self,
+        locator: Locator,
+        timeout: float | None = None,
+    ) -> Page:
         """点击目标元素并等待新标签页。"""
         if self._context is None:
             raise AppError("Camoufox 上下文未初始化, 请先调用 launch()")
@@ -150,13 +150,13 @@ class BaseCamoufox:
         self.set_page(new_page)
         return new_page
 
-    async def evaluate(self, script: str, arg: object | None = None) -> object:
+    async def evaluate(self, script: str, arg: object | None = None) -> Any:
         """在页面上下文执行 JavaScript。"""
         return await self.page.evaluate(script, arg)
 
-    async def screenshot(self, path: str, full_page: bool = True) -> None:
-        """保存页面截图。"""
-        await self.page.screenshot(path=path, full_page=full_page, type="png")
+    async def screenshot(self, path: str, full_page: bool = True) -> bytes:
+        """保存页面截图, 返回截图二进制内容。"""
+        return await self.page.screenshot(path=path, full_page=full_page, type="png")
 
     @staticmethod
     def filter_valid_cookies(
@@ -190,9 +190,18 @@ class BaseCamoufox:
         cookies = await self.get_cookies()
         return any(name in str(cookie.get("name", "")) for cookie in cookies)
 
-    async def goto(self, url: str, wait_until: str = "domcontentloaded") -> None:
-        """跳转到指定地址。"""
-        await self.page.goto(url, wait_until=wait_until)
+    async def goto(
+        self,
+        url: str,
+        wait_until: Literal[
+            "commit",
+            "domcontentloaded",
+            "load",
+            "networkidle",
+        ] = "domcontentloaded",
+    ) -> Response | None:
+        """跳转到指定地址, 返回导航响应。"""
+        return await self.page.goto(url, wait_until=wait_until)
 
     def current_url(self) -> str:
         """返回当前页面 URL。"""
@@ -206,15 +215,24 @@ class BaseCamoufox:
         """等待指定毫秒数。"""
         await self.page.wait_for_timeout(timeout_ms)
 
-    async def wait_for_load_state(self, state: str = "networkidle") -> None:
+    async def wait_for_load_state(
+        self,
+        state: Literal["domcontentloaded", "load", "networkidle"] = "networkidle",
+    ) -> None:
         """等待页面达到指定加载状态。"""
         await self.page.wait_for_load_state(state)
 
     async def wait_for_url(
         self,
-        url: str | object,
+        url: str | Pattern[str] | Callable[[str], bool],
         *,
-        wait_until: str | None = None,
+        wait_until: Literal[
+            "commit",
+            "domcontentloaded",
+            "load",
+            "networkidle",
+        ]
+        | None = None,
         timeout: float | None = None,
     ) -> None:
         """等待当前页面 URL 匹配指定条件。
@@ -226,7 +244,7 @@ class BaseCamoufox:
         """
         await self.page.wait_for_url(url, wait_until=wait_until, timeout=timeout)
 
-    def locator(self, selector: str) -> Any:
+    def locator(self, selector: str) -> Locator:
         """按 CSS/文本选择器创建定位器。"""
         return self.page.locator(selector)
 

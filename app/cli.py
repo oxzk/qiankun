@@ -43,9 +43,9 @@ class CliApplication:
         )
         subparsers = parser.add_subparsers(dest="command")
         subparsers.add_parser("sync", help="同步内置 Provider 到数据库")
-        run_provider_parser = subparsers.add_parser("run-provider", help="运行指定 Provider")
-        run_provider_parser.add_argument("provider_name", help="Provider 名称")
-        run_provider_parser.add_argument(
+        run_parser = subparsers.add_parser("run", help="运行指定 Provider")
+        run_parser.add_argument("provider_name", help="Provider 名称")
+        run_parser.add_argument(
             "--config",
             default="{}",
             help="Provider 配置 JSON 对象, 默认: {}",
@@ -65,7 +65,7 @@ class CliApplication:
         if args.command == "sync":
             await self.sync_builtin_providers()
             return
-        if args.command == "run-provider":
+        if args.command == "run":
             await self.run_provider(args.provider_name, self.parse_config(args.config))
 
     async def sync_builtin_providers(self) -> None:
@@ -85,23 +85,21 @@ class CliApplication:
             if exc.status_code != 404:
                 raise
         else:
-            result = await self.services.provider_services.execution.test_run_provider_class(
+            await self.services.provider_services.execution.test_run_provider_class(
                 provider_class,
                 provider_name,
                 config,
             )
-            print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False))
             return
 
         await db.connect()
         try:
-            result = await self.services.provider_services.execution.test_run_provider(
+            await self.services.provider_services.execution.test_run_provider(
                 provider_name,
                 config,
             )
         finally:
             await db.close()
-        print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False))
 
     def list_builtin_providers(self) -> None:
         """列出可执行的内置 Provider, 不读取数据库。"""
