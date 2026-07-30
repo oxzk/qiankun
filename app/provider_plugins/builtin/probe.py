@@ -179,6 +179,8 @@ class ProbeConfig(ProviderConfig):
         )
 
 
+
+
 class ProbeProvider(BaseProvider):
     """连通性检测 Provider 实现。"""
 
@@ -190,7 +192,8 @@ class ProbeProvider(BaseProvider):
         config: ProviderConfig,
     ) -> ProviderResult:
         """执行连通性检测。"""
-        typed_config = ProbeConfig.model_validate(config)
+        assert isinstance(config, ProbeConfig)
+        typed_config = config
         if typed_config.kind == "HTTP":
             return await self._check_http(typed_config)
         if typed_config.kind == "Redis":

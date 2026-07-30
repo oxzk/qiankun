@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-from curl_cffi import requests
 from pydantic import Field, ValidationInfo, field_validator
 
-from app.provider_plugins.base import BaseProvider, DEFAULT_FORUM_USER_AGENT, ForumClient
-from app.provider_plugins.contracts import ProviderConfig, ProviderResult
+from app.provider_plugins.base import DEFAULT_FORUM_USER_AGENT, ForumClient
+from app.provider_plugins.base.http_checkin import BaseHttpCheckinProvider
+from app.provider_plugins.contracts import ProviderConfig
 
 MOXING_SIGN_SUCCESS_TEXTS = ("签到成功", "已签到", "今天已签")
 """Moxing 签到成功或已签到文本。"""
@@ -47,7 +47,7 @@ class MoxingConfig(ProviderConfig):
         return normalized
 
 
-class MoxingProvider(BaseProvider):
+class MoxingProvider(BaseHttpCheckinProvider):
     """Moxing 论坛签到和积分查询 Provider。"""
 
     name = "moxing"
@@ -55,56 +55,32 @@ class MoxingProvider(BaseProvider):
     USER_AGENT = DEFAULT_FORUM_USER_AGENT
     """Moxing 请求使用的浏览器标识。"""
 
-    async def execute(
-        self,
-        config: ProviderConfig,
-    ) -> ProviderResult:
-        """执行 Moxing 签到前查询, 签到和签到后查询流程。"""
-        typed_config = MoxingConfig.model_validate(config)
-        forum = self._forum_for(typed_config)
-        headers = forum.request_headers(typed_config.cookie)
-        self.log(f"[{typed_config.username}] Moxing 处理开始, 站点 {typed_config.base_url}")
-        try:
-            initial_info = await forum.user_info(headers)
-            self.log(f"[{typed_config.username}] Moxing 签到前积分: {initial_info}")
+    def checkin_label(self) -> str:
+        """结果文案前缀。"""
+        return "Moxing "
 
-            checkin_result = await self._checkin(typed_config, forum, headers)
-            status = self._parse_checkin_status(checkin_result)
-            self.log(f"[{typed_config.username}] Moxing 签到状态: {status}")
+    def checkin_username(self, config: ProviderConfig) -> str:
+        """返回账号标识。"""
+        assert isinstance(config, MoxingConfig)
+        return config.username
 
-            final_info = await forum.user_info(headers)
-            self.log(f"[{typed_config.username}] Moxing 签到后积分: {final_info}")
-        except requests.RequestsError as exc:
-            self.log(f"[{typed_config.username}] Moxing 站点请求失败: {exc}")
-            return ProviderResult.fail(
-                message="Moxing 站点请求失败",
-                data={"error": str(exc), "site_url": typed_config.base_url},
-            )
-        except ValueError as exc:
-            self.log(f"[{typed_config.username}] Moxing 站点处理失败: {exc}")
-            return ProviderResult.fail(
-                message="Moxing 站点处理失败",
-                data={"error": str(exc), "site_url": typed_config.base_url},
-            )
+    def checkin_site_url(self, config: ProviderConfig) -> str:
+        """返回站点根地址。"""
+        assert isinstance(config, MoxingConfig)
+        return config.base_url
 
-        self.log(f"[{typed_config.username}] Moxing 处理完成, 状态 {status}")
-        return ProviderResult.ok(
-            message=f"Moxing 处理完成: {status}",
-            data={
-                "status": status,
-                "initial_info": initial_info,
-                "final_info": final_info,
-                "site_url": typed_config.base_url,
-            },
-        )
+    async def fetch_status(self, config: ProviderConfig) -> str:
+        """查询用户积分。"""
+        assert isinstance(config, MoxingConfig)
+        forum = self._forum_for(config)
+        headers = forum.request_headers(config.cookie)
+        return await forum.user_info(headers)
 
-    async def _checkin(
-        self,
-        config: MoxingConfig,
-        forum: ForumClient,
-        headers: dict[str, str],
-    ) -> str:
+    async def do_checkin(self, config: ProviderConfig) -> str:
         """发现并执行 Moxing 签到请求。"""
+        assert isinstance(config, MoxingConfig)
+        forum = self._forum_for(config)
+        headers = forum.request_headers(config.cookie)
         response = await self._http_request(forum.credit_url, headers=headers)
         html = response.text
         if any(text in html for text in MOXING_ALREADY_SIGNED_TEXTS):
@@ -112,18 +88,19 @@ class MoxingProvider(BaseProvider):
 
         sign_href = forum.find_first_link_in_element(html, MOXING_SIGN_ELEMENT_ID)
         if not sign_href:
-            self.log(f"[{config.username}] Moxing 签到入口不存在")
+            self.log(f"[{config.username}] 签到入口不存在")
             return "签到链接不存在, 可能今日已签到"
 
         sign_url = forum.absolute_url(sign_href)
         response = await self._http_request(sign_url, headers=headers)
         return response.text
 
-    def _parse_checkin_status(self, html: str) -> str:
+    def parse_checkin_status(self, raw: str, config: ProviderConfig) -> str:
         """解析 Moxing 签到状态。"""
-        if any(text in html for text in MOXING_SIGN_SUCCESS_TEXTS):
+        del config
+        if any(text in raw for text in MOXING_SIGN_SUCCESS_TEXTS):
             return "签到成功"
-        if any(text in html for text in MOXING_ALREADY_SIGNED_TEXTS):
+        if any(text in raw for text in MOXING_ALREADY_SIGNED_TEXTS):
             return "今日已签到"
         return "签到完成"
 

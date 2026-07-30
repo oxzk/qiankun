@@ -4,12 +4,15 @@ import inspect
 from types import ModuleType
 
 from app.shared.errors import AppError
+from app.provider_plugins.base.browser import BrowserDriver
 from app.provider_plugins.base.browser_provider import BaseBrowserProvider
 from app.provider_plugins.base.camoufox import BaseCamoufox
 from app.provider_plugins.base.discuz import (
     DISCUZ_USER_AGENT,
     DiscuzForum,
 )
+from app.provider_plugins.base.dom_actions import DomActionsMixin
+from app.provider_plugins.base.http_checkin import BaseHttpCheckinProvider
 from app.provider_plugins.base.provider import BaseProvider
 from app.provider_plugins.base.turnstile import (
     TurnstileDetector,
@@ -20,10 +23,13 @@ from app.provider_plugins.base.turnstile import (
 __all__ = [
     "BaseBrowserProvider",
     "BaseCamoufox",
+    "BaseHttpCheckinProvider",
     "BaseProvider",
+    "BrowserDriver",
     "DEFAULT_FORUM_USER_AGENT",
     "DISCUZ_USER_AGENT",
     "DiscuzForum",
+    "DomActionsMixin",
     "ForumClient",
     "TurnstileDetector",
     "TurnstileHandler",
@@ -49,7 +55,7 @@ def find_single_provider_class(
         for _, member in inspect.getmembers(module, inspect.isclass)
         if member.__module__ == module_name
         and issubclass(member, BaseProvider)
-        and member not in {BaseProvider, BaseBrowserProvider}
+        and member not in {BaseProvider, BaseBrowserProvider, BaseHttpCheckinProvider}
         and not inspect.isabstract(member)
     ]
     if not provider_classes:

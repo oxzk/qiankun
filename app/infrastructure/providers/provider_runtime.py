@@ -5,14 +5,13 @@ from __future__ import annotations
 from pydantic import ValidationError
 
 from app.infrastructure.database.models.provider import Provider
+from app.infrastructure.providers.code_loader import ProviderCodeLoader
 from app.provider_plugins.base import BaseProvider
 from app.provider_plugins.contracts import (
     ProviderContext,
     ProviderResult,
     ProviderValidateResult,
-    format_provider_log,
 )
-from app.infrastructure.providers.code_loader import ProviderCodeLoader
 
 
 class ProviderRuntime:
@@ -55,15 +54,6 @@ class ProviderRuntime:
         config: dict[str, object],
         context: ProviderContext,
     ) -> ProviderResult:
-        """校验配置并执行 Provider 类。"""
-        try:
-            typed_config = provider_class.config_schema.model_validate(config)
-        except ValidationError as exc:
-            message = f"Provider 配置无效: {exc}"
-            return ProviderResult(
-                success=False,
-                message=message,
-                logs=[format_provider_log(message)],
-            )
+        """执行 Provider 类; 配置校验由 ``BaseProvider.run`` 统一完成。"""
         provider = provider_class()
-        return await provider.run(typed_config, context)
+        return await provider.run(config, context)

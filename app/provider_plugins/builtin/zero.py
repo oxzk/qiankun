@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import re
 import time
+from dataclasses import dataclass
 from typing import ClassVar
 
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationInfo, field_validator
 
-from app.provider_plugins.base import BaseBrowserProvider, BaseCamoufox
+from app.provider_plugins.base import BaseBrowserProvider
+from app.provider_plugins.base.browser import BrowserDriver
 from app.provider_plugins.contracts import BrowserProviderConfig, ProviderResult
-from app.shared.logger import logger
+from app.shared.errors import AppError
+
 try:
     from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 except ImportError:  # pragma: no cover - 未安装浏览器依赖时回退。
@@ -19,317 +23,413 @@ except ImportError:  # pragma: no cover - 未安装浏览器依赖时回退。
 class ZeroConfig(BrowserProviderConfig):
     """Zero Provider 配置。"""
 
-    email: str | None = Field(default="atfangwenxue@gmail.com", description="登录邮箱")
-    password: str | None = Field(default="B*bw@eI3n@i4^w", description="登录密码")
+    email: str = Field(description="登录邮箱")
+    password: str = Field(description="登录密码")
 
     @field_validator("email", "password", mode="before")
     @classmethod
-    def normalize_optional_text(cls, value: object) -> str | None:
-        """规范化可选登录文本配置。"""
-        if value is None:
-            return None
-        text = str(value).strip()
-        return text or None
+    def require_non_empty(cls, value: object, info: ValidationInfo) -> str:
+        """校验邮箱/密码非空。"""
+        label = "邮箱" if info.field_name == "email" else "密码"
+        if value is None or not str(value).strip():
+            raise ValueError(f"{label}不能为空")
+        return str(value).strip()
+
+
+@dataclass(frozen=True)
+class CheckInResult:
+    """签到执行结果。"""
+
+    before_points: str | None
+    after_points: str | None
+    status: str
+
+
+@dataclass(frozen=True)
+class CheckinPageSnapshot:
+    """签到页 DOM 快照。"""
+
+    balance: str | None
+    already_checked_in: bool
+    has_spin_button: bool
+    spin_disabled: bool
 
 
 class ZeroProvider(BaseBrowserProvider):
-    """Zero 签到 Provider。
-
-    打开签到页, 若跳转到登录页则使用邮箱密码登录并处理 Turnstile,
-    再读取积分并点击抽奖按钮完成签到。
-    """
+    """Zero 签到 Provider。"""
 
     name = "zero"
     config_schema = ZeroConfig
+    default_wait_load_state: ClassVar[str | None] = "load"
+
     CHECKIN_URL: ClassVar[str] = "https://api.saviour.cc.cd/daily-checkin"
     EMAIL_SELECTOR: ClassVar[str] = "input[type='email']"
     AGREEMENT_SELECTOR: ClassVar[str] = "#login-agreement-consent"
     PASSWORD_SELECTOR: ClassVar[str] = "input[type='password']"
     LOGIN_SUBMIT_SELECTOR: ClassVar[str] = "form button[type='submit']"
     SPIN_BUTTON_SELECTOR: ClassVar[str] = "button.spin-button"
-    POINTS_SELECTOR: ClassVar[str] = ".count-up-value"
+    CHECKIN_HERO_SELECTOR: ClassVar[str] = "section.checkin-hero"
     LOGIN_URL_KEYWORD: ClassVar[str] = "login"
+    PAGE_LANDING_KEYWORDS: ClassVar[tuple[str, ...]] = ("login",)
+    BALANCE_LABELS: ClassVar[tuple[str, ...]] = ("Current Balance", "当前余额")
+    ALREADY_CHECKED_IN_TEXTS: ClassVar[tuple[str, ...]] = (
+        "already checked in",
+        "已经签到",
+    )
+
+    CHECK_IN_SUCCESS: ClassVar[str] = "签到成功"
+    CHECK_IN_ALREADY_DONE: ClassVar[str] = "今日已签到"
+    CHECK_IN_NOT_FOUND: ClassVar[str] = "未找到签到按钮"
     CHECK_IN_UNCONFIRMED: ClassVar[str] = "签到结果未确认"
+
     LOGIN_MAX_ATTEMPTS: ClassVar[int] = 2
     PAGE_READY_TIMEOUT_MS: ClassVar[int] = 15_000
     LOGIN_SUCCESS_TIMEOUT_MS: ClassVar[int] = 20_000
     CHECK_IN_RESULT_TIMEOUT_MS: ClassVar[int] = 12_000
+    SELECTOR_TIMEOUT_MS: ClassVar[int] = 10_000
 
     async def execute_with_browser(
         self,
-        browser: BaseCamoufox,
+        browser: BrowserDriver,
         provider_config: BrowserProviderConfig,
     ) -> ProviderResult:
         """在已启动浏览器中执行登录与签到流程。"""
-        config = ZeroConfig.model_validate(provider_config)
+        config = (
+            provider_config
+            if isinstance(provider_config, ZeroConfig)
+            else ZeroConfig.model_validate(provider_config)
+        )
         try:
-            # URL 含 login 表示被重定向到登录页, 需要登录.
-            needs_login = await self.open_url_and_check(
-                browser,
-                self.CHECKIN_URL,
-                self.LOGIN_URL_KEYWORD,
-                timeout_ms=self.PAGE_READY_TIMEOUT_MS,
-            )
-
-            if needs_login:
-                self.log(f"检测到登录页: {browser.current_url()}")
+            if await self.check_login(browser):
+                self.log(f"需要登录, 当前地址 {browser.current_url()}")
                 if not await self._login(browser, config):
                     return await self.fail_with_screenshot(
                         browser,
-                        message="Zero 登录失败, 当前仍为登录页",
+                        message="登录失败, 未能进入签到页",
                         reason="login_failed",
                         data={"url": browser.current_url()},
                     )
-                self.log(f"登录成功: {browser.current_url()}")
-                # 登录成功后重新进入签到页, 确保后续读取积分与点击按钮.
-                still_on_login = await self.open_url_and_check(
-                    browser,
-                    self.CHECKIN_URL,
-                    self.LOGIN_URL_KEYWORD,
-                    timeout_ms=self.PAGE_READY_TIMEOUT_MS,
-                )
-                if still_on_login:
-                    return await self.fail_with_screenshot(
-                        browser,
-                        message="Zero 登录后无法进入签到页",
-                        reason="post_login_checkin_failed",
-                        data={"url": browser.current_url()},
-                    )
+                self.log(f"登录成功, 已到达签到页 {browser.current_url()}")
             else:
-                self.log(f"已登录, 当前页面: {browser.current_url()}")
+                self.log(f"会话有效, 已在签到页 {browser.current_url()}")
 
-            before_points = await self._get_points(browser, navigate=False)
-            self.log(f"签到前积分: {before_points or '-'}")
-
-            check_in_status = await self._check_in(browser, before_points=before_points)
-
-            after_points = await self._get_points(browser, navigate=True)
-            # 若点击后已通过积分变化确认成功, 优先保留签到后读到的最新积分.
-            if after_points is None and check_in_status == self.CHECK_IN_SUCCESS:
-                after_points = before_points
-            self.log(f"签到后积分: {after_points or '-'}")
-
-            points_change = (
-                f"{before_points} -> {after_points}"
-                if before_points and after_points
-                else "-"
+            await self.wait_for_selector(
+                browser,
+                self.CHECKIN_HERO_SELECTOR,
+                timeout_ms=self.PAGE_READY_TIMEOUT_MS,
             )
-            self.log(f"签到状态: {check_in_status}")
-            self.log(f"积分变化: {points_change}")
-
-            data: dict[str, object] = {
-                "before_points": before_points,
-                "after_points": after_points,
-                "points_change": points_change,
-                "check_in_status": check_in_status,
-                "url": browser.current_url(),
-            }
-            if check_in_status == self.CHECK_IN_NOT_FOUND:
-                return await self.fail_with_screenshot(
-                    browser,
-                    message="Zero 未找到签到按钮",
-                    reason="spin_button_missing",
-                    data=data,
-                )
-            if check_in_status == self.CHECK_IN_UNCONFIRMED:
-                return await self.fail_with_screenshot(
-                    browser,
-                    message="Zero 签到结果未确认",
-                    reason="checkin_unconfirmed",
-                    data=data,
-                )
-            if check_in_status == self.CHECK_IN_ALREADY_DONE:
-                return ProviderResult.ok(
-                    message=f"Zero 今日已签到 ({after_points or before_points or '-'})",
-                    data=data,
-                )
-            return ProviderResult.ok(
-                message=f"Zero 签到成功 ({points_change})",
-                data=data,
-            )
+            return await self._build_check_in_result(browser, await self._check_in(browser))
         except Exception as exc:
-            logger.exception("Zero 执行失败: %s", exc)
-            self.log(f"Zero 执行失败: {type(exc).__name__}: {str(exc)}")
+            self.log(f"执行异常: {type(exc).__name__}: {exc}")
             return await self.fail_with_screenshot(
                 browser,
-                message=f"Zero 执行失败: {type(exc).__name__}",
+                message=f"执行异常: {type(exc).__name__}",
                 reason="execute_failed",
                 data={"url": browser.current_url(), "error": str(exc)},
             )
 
-    def _is_login_url(self, browser: BaseCamoufox) -> bool:
-        """判断当前 URL 是否包含 login。"""
+    async def check_login(self, browser: BrowserDriver) -> bool:
+        """打开签到页并判断是否需要登录。"""
+        await self.open_url_and_check(
+            browser,
+            self.CHECKIN_URL,
+            self.PAGE_LANDING_KEYWORDS,
+            timeout_ms=self.PAGE_READY_TIMEOUT_MS,
+        )
         return self.LOGIN_URL_KEYWORD in browser.current_url().lower()
 
-    async def _wait_for_login_success(
+    async def _build_check_in_result(
         self,
-        browser: BaseCamoufox,
-        timeout_ms: int | None = None,
-    ) -> bool:
-        """通过 ``wait_for_url`` 等待 URL 离开 login, 判定登录成功。
+        browser: BrowserDriver,
+        result: CheckInResult,
+    ) -> ProviderResult:
+        """按签到状态构造 ProviderResult。"""
+        before_points = result.before_points
+        after_points = result.after_points or (
+            before_points if result.status == self.CHECK_IN_SUCCESS else result.after_points
+        )
+        points_change = (
+            f"{before_points} -> {after_points}"
+            if before_points and after_points
+            else "-"
+        )
+        balance = after_points or before_points or "-"
+        self.log(
+            f"签到结束: {result.status}, 余额 {before_points or '-'} -> {after_points or '-'}"
+        )
+        data: dict[str, object] = {
+            "before_points": before_points,
+            "after_points": after_points,
+            "points_change": points_change,
+            "check_in_status": result.status,
+            "url": browser.current_url(),
+        }
+        if result.status == self.CHECK_IN_ALREADY_DONE:
+            return ProviderResult.ok(message=f"今日已签到, 余额 {balance}", data=data)
+        if result.status == self.CHECK_IN_SUCCESS:
+            return ProviderResult.ok(message=f"签到成功, 余额 {points_change}", data=data)
+        if result.status == self.CHECK_IN_NOT_FOUND:
+            message, reason = "未找到签到按钮", "spin_button_missing"
+        elif result.status == self.CHECK_IN_UNCONFIRMED:
+            message, reason = "签到结果未确认", "checkin_unconfirmed"
+        else:
+            message, reason = f"未知签到状态: {result.status}", "checkin_unknown"
+        return await self.fail_with_screenshot(
+            browser,
+            message=message,
+            reason=reason,
+            data=data,
+        )
 
-        超时视为未成功 (返回 False), 供登录重试使用; 其他异常向上抛出.
-        """
-        timeout = timeout_ms or self.LOGIN_SUCCESS_TIMEOUT_MS
-        keyword = self.LOGIN_URL_KEYWORD.lower()
+    def _is_checkin_url(self, url: str) -> bool:
+        """判断 URL 是否为签到页 (匹配 ``CHECKIN_URL`` 路径)。"""
+        target = self.CHECKIN_URL.rstrip("/").lower()
+        current = url.split("?", 1)[0].rstrip("/").lower()
+        return current == target or current.endswith("/daily-checkin")
 
-        def _left_login(current: str) -> bool:
-            # URL 不再包含 login 关键字即视为已离开登录页.
-            return keyword not in current.lower()
+    async def _wait_for_login_success(self, browser: BrowserDriver) -> bool:
+        """等待登录后进入签到页 (``CHECKIN_URL``)。"""
+
+        def _on_checkin(current: str) -> bool:
+            return self._is_checkin_url(current)
 
         try:
-            await browser.wait_for_url(_left_login, timeout=timeout)
+            await browser.wait_for_url(_on_checkin, timeout=self.LOGIN_SUCCESS_TIMEOUT_MS)
             return True
         except PlaywrightTimeoutError:
-            return not self._is_login_url(browser)
+            return self._is_checkin_url(browser.current_url())
 
-    async def _login(
-        self,
-        browser: BaseCamoufox,
-        config: ZeroConfig,
-    ) -> bool:
-        """使用邮箱密码登录: 先检测并处理 Turnstile, 再提交, 有限次重试。
+    async def _login(self, browser: BrowserDriver, config: ZeroConfig) -> bool:
+        """填写表单并登录, 成功返回 True, 仍停登录页返回 False。"""
+        # 协议勾选可选: 页面无该节点时跳过.
+        agreement = await self.wait_for_selector(
+            browser,
+            self.AGREEMENT_SELECTOR,
+            timeout_ms=self.SELECTOR_TIMEOUT_MS,
+        )
+        if agreement is not None:
+            await agreement.click(timeout=self.SELECTOR_TIMEOUT_MS)
 
-        Returns:
-            登录成功返回 True, 仍停留在登录页返回 False.
-        """
-        await browser.page.wait_for_load_state("networkidle")
-        await browser.page.wait_for_timeout(2000)
-        await browser.locator(self.AGREEMENT_SELECTOR).click(timeout=10000)
-        await browser.page.wait_for_timeout(2000)
+        await self.wait_for_selector_fill(
+            browser,
+            self.EMAIL_SELECTOR,
+            config.email,
+            timeout_ms=self.SELECTOR_TIMEOUT_MS,
+        )
+        await self.wait_for_selector_fill(
+            browser,
+            self.PASSWORD_SELECTOR,
+            config.password,
+            timeout_ms=self.SELECTOR_TIMEOUT_MS,
+        )
+        self.log(f"登录表单已填写 ({config.email})")
 
-        await browser.locator(self.EMAIL_SELECTOR).fill(config.email)
-        await browser.page.wait_for_timeout(500)
-        await browser.locator(self.PASSWORD_SELECTOR).fill(config.password)
-        self.log(f"已填写登录表单: {config.email}")
-        await browser.page.wait_for_timeout(1000)
+        for attempt in range(1, self.LOGIN_MAX_ATTEMPTS + 1):
+            self.log(f"开始登录 ({attempt}/{self.LOGIN_MAX_ATTEMPTS})")
+            if await self.is_turnstile_visible(browser):
+                self.log("存在人机验证, 开始处理")
+                if not await self.handle_visible_turnstile(browser):
+                    if attempt >= self.LOGIN_MAX_ATTEMPTS:
+                        raise AppError("人机验证失败")
+                    self.log("人机验证未通过, 准备重试")
+                    continue
 
-        if await self.is_turnstile_visible(browser):
-            self.log("检测到 Turnstile, 先完成验证再提交")
-            await self.handle_visible_turnstile(browser)
-
-        await browser.page.wait_for_timeout(10000)
-
-        # submit = browser.locator(self.LOGIN_SUBMIT_SELECTOR).first
-        # await submit.wait_for(state="visible", timeout=10000)
-
-        # for attempt in range(1, self.LOGIN_MAX_ATTEMPTS + 1):
-        #     self.log(f"登录尝试 {attempt}/{self.LOGIN_MAX_ATTEMPTS}")
-
-        #     # 先检测 Turnstile: 可见则完成验证, 再提交登录表单.
-        #     if await self.is_turnstile_visible(browser):
-        #         self.log("检测到 Turnstile, 先完成验证再提交")
-        #         await self.handle_visible_turnstile(browser)
-        #     else:
-        #         self.log("未检测到 Turnstile, 直接提交")
-
-        #     await submit.click(timeout=10000)
-        #     self.log("已提交登录表单, 等待登录结果")
-
-        #     if await self._wait_for_login_success(browser):
-        #         return True
-
-        #     # 仍停在登录态: 若还有可见 Turnstile 则进入下一轮, 否则失败。
-        #     if attempt >= self.LOGIN_MAX_ATTEMPTS:
-        #         break
-        #     if not await self.is_turnstile_visible(browser):
-        #         self.log("登录未成功且无可见 Turnstile, 停止重试")
-        #         break
-        #     self.log("登录未成功, 准备再次处理 Turnstile 后重试")
-
+            await self.wait_for_selector_click(
+                browser,
+                self.LOGIN_SUBMIT_SELECTOR,
+                timeout_ms=self.SELECTOR_TIMEOUT_MS,
+            )
+            self.log("已提交登录, 等待进入签到页")
+            if await self._wait_for_login_success(browser):
+                return True
+            if attempt < self.LOGIN_MAX_ATTEMPTS and await self.is_turnstile_visible(browser):
+                self.log("仍未进入签到页, 将再次处理人机验证后重试")
+                continue
+            break
         return False
 
-    async def _check_in(
-        self,
-        browser: BaseCamoufox,
-        *,
-        before_points: str | None,
-    ) -> str:
-        """点击抽奖按钮, 并通过按钮状态或积分变化确认结果。"""
-        found = await self.wait_for_any_selector(
+    async def _check_in(self, browser: BrowserDriver) -> CheckInResult:
+        """执行签到并返回结构化结果。"""
+        snapshot = await self._ensure_checkin_snapshot(browser)
+        before = snapshot.balance
+        if snapshot.already_checked_in:
+            self.log(f"页面显示今日已签到, 余额 {before or '-'}")
+        elif snapshot.spin_disabled:
+            self.log(f"签到按钮不可用, 视为已签到, 余额 {before or '-'}")
+        elif snapshot.has_spin_button:
+            self.log(f"可以签到, 当前余额 {before or '-'}")
+        else:
+            self.log(f"未找到签到按钮, 当前余额 {before or '-'}")
+
+        if snapshot.already_checked_in or snapshot.spin_disabled:
+            return CheckInResult(before, snapshot.balance or before, self.CHECK_IN_ALREADY_DONE)
+        if not snapshot.has_spin_button:
+            return CheckInResult(before, snapshot.balance or before, self.CHECK_IN_NOT_FOUND)
+
+        button = await self.wait_for_selector_click(
             browser,
-            (self.SPIN_BUTTON_SELECTOR,),
-            timeout_ms=10_000,
+            self.SPIN_BUTTON_SELECTOR,
+            timeout_ms=self.SELECTOR_TIMEOUT_MS,
         )
-        if not found:
-            self.log("未找到抽奖按钮")
-            return self.CHECK_IN_NOT_FOUND
+        self.log("已点击签到, 等待结果")
+        after, status = await self._confirm_check_in_result(
+            browser,
+            button=button,
+            before_points=before,
+        )
+        return CheckInResult(before, after, status)
 
-        button = browser.locator(self.SPIN_BUTTON_SELECTOR).first
-        if await button.is_disabled():
-            return self.CHECK_IN_ALREADY_DONE
+    async def _ensure_checkin_snapshot(self, browser: BrowserDriver) -> CheckinPageSnapshot:
+        """读取签到页快照; 若无按钮且未声明已签到则短等后再读一次。"""
+        snapshot = await self._read_checkin_snapshot(browser)
+        if snapshot.already_checked_in or snapshot.has_spin_button:
+            return snapshot
+        await self.wait_for_any_selector(
+            browser,
+            (self.SPIN_BUTTON_SELECTOR, self.CHECKIN_HERO_SELECTOR),
+            timeout_ms=self.SELECTOR_TIMEOUT_MS,
+        )
+        return await self._read_checkin_snapshot(browser)
 
-        await button.click(timeout=10000)
-        self.log("已点击抽奖按钮, 等待结果确认")
-        return await self._confirm_check_in_result(
+    async def _confirm_check_in_result(
+        self,
+        browser: BrowserDriver,
+        *,
+        button: object,
+        before_points: str | None,
+    ) -> tuple[str | None, str]:
+        """轮询确认签到结果。"""
+        deadline = time.monotonic() + self.CHECK_IN_RESULT_TIMEOUT_MS / 1000
+        while time.monotonic() < deadline:
+            judged = await self._judge_check_in(
+                browser,
+                button=button,
+                before_points=before_points,
+            )
+            if judged is not None:
+                return judged
+            await browser.wait_for_timeout(self.ELEMENT_POLL_MS)
+
+        judged = await self._judge_check_in(
             browser,
             button=button,
             before_points=before_points,
         )
+        if judged is not None:
+            return judged
+        snapshot = await self._read_checkin_snapshot(browser)
+        self.log(
+            f"签到未确认: 按钮仍可点且余额未变 "
+            f"({before_points or '-'} -> {snapshot.balance or '-'})"
+        )
+        return snapshot.balance or before_points, self.CHECK_IN_UNCONFIRMED
 
-    async def _confirm_check_in_result(
+    async def _judge_check_in(
         self,
-        browser: BaseCamoufox,
+        browser: BrowserDriver,
         *,
         button: object,
         before_points: str | None,
-    ) -> str:
-        """通过按钮 disabled 或积分变化确认签到结果。"""
-        deadline = time.monotonic() + self.CHECK_IN_RESULT_TIMEOUT_MS / 1000
-        while time.monotonic() < deadline:
-            if await button.is_disabled():  # type: ignore[attr-defined]
-                self.log("签到按钮已禁用, 判定签到完成")
-                return self.CHECK_IN_SUCCESS
+    ) -> tuple[str | None, str] | None:
+        """判定签到是否完成; 未完成返回 None。"""
+        snapshot = await self._read_checkin_snapshot(browser)
+        current = snapshot.balance
+        try:
+            disabled = bool(await button.is_disabled())  # type: ignore[attr-defined]
+        except Exception:
+            disabled = snapshot.spin_disabled
 
-            current_points = await self._read_points_text(browser)
-            if (
-                before_points is not None
-                and current_points is not None
-                and current_points != before_points
-            ):
-                self.log(f"积分已变化: {before_points} -> {current_points}")
-                return self.CHECK_IN_SUCCESS
+        if disabled or snapshot.already_checked_in:
+            reason = "按钮已禁用" if disabled else "页面显示已签到"
+            self.log(f"签到完成 ({reason}), 余额 {current or before_points or '-'}")
+            return current or before_points, self.CHECK_IN_SUCCESS
+        if before_points is not None and current is not None and current != before_points:
+            self.log(f"签到完成 (余额变化 {before_points} -> {current})")
+            return current, self.CHECK_IN_SUCCESS
+        return None
 
-            await browser.wait_for_timeout(self.ELEMENT_POLL_MS)
+    async def _read_checkin_snapshot(self, browser: BrowserDriver) -> CheckinPageSnapshot:
+        """一次 evaluate 读取余额 / 已签到 / 抽奖按钮状态。"""
+        try:
+            raw = await browser.evaluate(
+                """({ heroSelector, spinSelector, balanceLabels, alreadyTexts }) => {
+                    const norm = (v) => String(v || "").trim();
+                    const lower = (v) => norm(v).toLowerCase();
+                    const hero = document.querySelector(heroSelector);
+                    const heroText = hero ? String(hero.innerText || "") : "";
+                    const heroLower = heroText.toLowerCase();
 
-        # 超时后做最终判定: 按钮禁用视为成功; 积分不变且仍可点视为未确认。
-        if await button.is_disabled():  # type: ignore[attr-defined]
-            return self.CHECK_IN_SUCCESS
+                    let balance = "";
+                    if (hero) {
+                        const labels = (balanceLabels || []).map((x) => lower(x));
+                        const label = Array.from(hero.querySelectorAll("p")).find((el) => {
+                            const t = lower(el.textContent);
+                            return labels.some((item) => item && t.includes(item));
+                        });
+                        if (label && label.nextElementSibling) {
+                            balance = norm(label.nextElementSibling.textContent);
+                        }
+                        if (!balance) {
+                            const match = heroText.match(/\\$[\\d,]+(?:\\.\\d+)?/);
+                            if (match) balance = match[0];
+                        }
+                        if (!balance) {
+                            const num = heroText.match(
+                                /(?:余额|Balance)[^\\d]*([\\d,]+(?:\\.\\d+)?)/i
+                            );
+                            if (num) balance = num[1];
+                        }
+                    }
 
-        current_points = await self._read_points_text(browser)
-        if (
-            before_points is not None
-            and current_points is not None
-            and current_points != before_points
-        ):
-            return self.CHECK_IN_SUCCESS
-
-        self.log("签到后按钮仍可点且积分未变化, 结果未确认")
-        return self.CHECK_IN_UNCONFIRMED
-
-    async def _get_points(
-        self,
-        browser: BaseCamoufox,
-        *,
-        navigate: bool = True,
-    ) -> str | None:
-        """读取当前积分数值。"""
-        if navigate:
-            await browser.goto(self.CHECKIN_URL)
-            ready = await self.wait_for_any_selector(
-                browser,
-                (self.POINTS_SELECTOR, self.SPIN_BUTTON_SELECTOR),
-                timeout_ms=self.PAGE_READY_TIMEOUT_MS,
+                    const already = (alreadyTexts || [])
+                        .map((x) => lower(x))
+                        .some((item) => item && heroLower.includes(item));
+                    const spin = document.querySelector(spinSelector);
+                    const hasSpin = Boolean(spin);
+                    const spinDisabled = hasSpin && Boolean(
+                        spin.disabled
+                        || spin.getAttribute("disabled") !== null
+                        || spin.classList.contains("disabled")
+                        || spin.getAttribute("aria-disabled") === "true"
+                    );
+                    return {
+                        balance,
+                        already_checked_in: already,
+                        has_spin_button: hasSpin,
+                        spin_disabled: spinDisabled,
+                    };
+                }""",
+                {
+                    "heroSelector": self.CHECKIN_HERO_SELECTOR,
+                    "spinSelector": self.SPIN_BUTTON_SELECTOR,
+                    "balanceLabels": list(self.BALANCE_LABELS),
+                    "alreadyTexts": list(self.ALREADY_CHECKED_IN_TEXTS),
+                },
             )
-            if not ready:
-                self.log("刷新签到页后未找到积分节点")
-                return None
-        return await self._read_points_text(browser)
+        except Exception as exc:
+            self.log(f"读取签到页状态失败: {type(exc).__name__}: {exc}", log_type="system")
+            return CheckinPageSnapshot(None, False, False, False)
 
-    async def _read_points_text(self, browser: BaseCamoufox) -> str | None:
-        """读取积分节点文本, 节点不存在时返回 None。"""
-        if not await self.is_selector_visible(browser, self.POINTS_SELECTOR):
+        raw = raw or {}
+        return CheckinPageSnapshot(
+            balance=self._normalize_balance(raw.get("balance")),
+            already_checked_in=bool(raw.get("already_checked_in")),
+            has_spin_button=bool(raw.get("has_spin_button")),
+            spin_disabled=bool(raw.get("spin_disabled")),
+        )
+
+    @staticmethod
+    def _normalize_balance(value: object) -> str | None:
+        """规范化余额文本: 去掉 US/USD 字样, 保留 ``$`` 与数值。"""
+        text = str(value or "").strip()
+        if not text:
             return None
-        value = await browser.locator(self.POINTS_SELECTOR).first.inner_text(timeout=3000)
-        text = value.strip() if value else ""
-        return text or None
+        # US$17.53 / USD $17.53 / USD17.53 -> 统一为 $ + 数值.
+        text = re.sub(r"(?i)^\s*us\s*d?\s*\$?\s*", "", text).strip()
+        if not text:
+            return None
+        if not text.startswith("$"):
+            # 纯数字时补上 $, 已有 $ 则保留.
+            if re.match(r"^[\d,]+(?:\.\d+)?$", text):
+                text = f"${text}"
+        return text

@@ -28,26 +28,6 @@ QianKun 是一个基于 FastAPI, SQLAlchemy Async 和 aiomysql 的定时任务�
 - TypeScript
 - Tailwind CSS
 
-## 目录
-
-```text
-.
-├── app/                    # 后端源码 (Python 包)
-│   ├── main.py             # FastAPI 应用入口
-│   ├── bootstrap/          # 依赖容器, Depends 注入与异常处理
-│   ├── middleware/         # 鉴权与请求日志中间件
-│   ├── config/             # 配置读取
-│   ├── infrastructure/     # 数据库, HTTP, Provider, 通知和安全基础设施
-│   ├── provider_plugins/   # Provider 插件契约和内置 Provider
-│   ├── routes/             # API 路由
-│   ├── schemas/            # Pydantic 请求和响应模型
-│   ├── services/           # 业务服务
-│   └── shared/             # 公共工具, 枚举和错误类型
-├── src/                    # React 前端应用
-├── migrations/             # Alembic 迁移脚本
-└── public/                 # 前端构建产物挂载目录
-```
-
 ## 配置
 
 从示例文件创建本地配置:
@@ -152,21 +132,6 @@ uv run qiankun run probe --config '{"accounts":[{"name":"main","url":"https://ex
 
 `--config` 必须是 JSON 对象。
 
-## API
-
-所有业务接口默认挂载在 `/api` 前缀下。
-
-| 资源 | 接口 |
-| --- | --- |
-| 健康检查 | `GET /api/health` |
-| 认证 | `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/change-password` |
-| Provider | `GET /api/providers`, `POST /api/providers`, `POST /api/providers/sync`, `GET /api/providers/{provider_name}`, `PUT /api/providers/{provider_name}`, `POST /api/providers/{provider_name}/enable`, `POST /api/providers/{provider_name}/disable`, `GET /api/providers/{provider_name}/config`, `POST /api/providers/{provider_name}/validate-config`, `POST /api/providers/{provider_name}/test-run` |
-| 任务 | `GET /api/tasks`, `POST /api/tasks`, `GET /api/tasks/{task_id}`, `PUT /api/tasks/{task_id}`, `DELETE /api/tasks/{task_id}`, `POST /api/tasks/{task_id}/run`, `POST /api/tasks/{task_id}/cancel`, `POST /api/tasks/{task_id}/enable`, `POST /api/tasks/{task_id}/disable` |
-| 执行记录 | `GET /api/executions`, `GET /api/executions/{execution_id}` |
-| 通知 | `GET /api/notifications`, `POST /api/notifications`, `PUT /api/notifications/{notification_id}`, `DELETE /api/notifications/{notification_id}`, `POST /api/notifications/{notification_id}/test` |
-| 备份 | `GET /api/backups`, `POST /api/backups`, `POST /api/backups/{filename}/restore` |
-| 统计 | `GET /api/stats` |
-
 ## 数据库迁移
 
 项目使用 Alembic 管理数据库结构, 迁移脚本目录为 `migrations/versions`。
@@ -184,6 +149,23 @@ uv run alembic -c alembic.ini revision --autogenerate -m "说明"
 ```
 
 提交迁移时必须包含 `migrations/versions` 下的新版本文件。
+
+## Docker 镜像
+
+GitHub Actions 会在以下场景构建并发布 `linux/amd64` 和 `linux/arm64` 镜像到 Docker Hub:
+
+- 推送到 `main` 分支时发布 `latest` 和 `main` 标签。
+- 推送 `v*` 版本标签时发布对应版本标签, 例如 `v1.2.3`, `1.2.3`, `1.2`, `1`。
+- 每次构建同时发布 `sha-<短提交哈希>` 标签, 确保手动运行时也有可追溯的镜像标签。
+
+发布前在 GitHub 仓库中配置以下 Actions secrets:
+
+| Secret | 说明 |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | Docker Hub 用户名 |
+| `DOCKERHUB_TOKEN` | 具有镜像写入权限的 Docker Hub access token |
+
+镜像名称为 `<DOCKERHUB_USERNAME>/qiankun`。本地构建和运行方式见 `docker/README.md`。
 
 ## 验证
 

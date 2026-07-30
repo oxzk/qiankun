@@ -74,7 +74,8 @@ class TelegramProvider(BaseProvider):
         config: ProviderConfig,
     ) -> ProviderResult:
         """按账号列表发送 Telegram 消息并读取第一条回复。"""
-        typed_config = TelegramProviderConfig.model_validate(config)
+        assert isinstance(config, TelegramProviderConfig)
+        typed_config = config
         redis_client = redis_asyncio.from_url(typed_config.redis_url, decode_responses=True)
         account_results: list[dict[str, Any]] = []
         self.log(f"开始发送 Telegram 消息, 账号数 {len(typed_config.accounts)}")

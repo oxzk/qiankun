@@ -39,7 +39,8 @@ class AfraidProvider(BaseProvider):
         config: ProviderConfig,
     ) -> ProviderResult:
         """执行 Afraid.org 登录检测。"""
-        typed_config = AfraidConfig.model_validate(config)
+        assert isinstance(config, AfraidConfig)
+        typed_config = config
         try:
             response = await self._http_request(
                 self.base_url,

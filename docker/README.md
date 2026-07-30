@@ -24,29 +24,28 @@ docker run --rm \
 | 端口 | 说明 |
 | --- | --- |
 | `8000` | API 和前端静态页面 |
-| `15902` | noVNC Web 入口 |
-| `5900` | 容器内部 VNC 端口, 默认不声明 `EXPOSE` |
+| `22` | OpenSSH Server |
 
-## 运行 noVNC
+## SSH
 
-只发布 noVNC Web 入口:
+默认 SSH 用户名为 `root`, 密码为 `12345678`. 启动容器时必须通过 `SSH_PASSWORD` 设置生产密码:
 
 ```bash
 docker run --rm \
   --env-file .env \
-  -e VNC_PASSWORD='change-me' \
+  -e SSH_PASSWORD='change-me' \
   -p 8000:8000 \
-  -p 15902:15902 \
+  -p 2222:22 \
   qiankun:local
 ```
 
-访问:
+连接 SSH:
 
-```text
-http://127.0.0.1:15902/
+```bash
+ssh root@127.0.0.1 -p 2222
 ```
 
-建议始终设置 `VNC_PASSWORD`。未设置时, 入口脚本会保留无密码 VNC 以兼容本地开发, 但会输出警告。
+容器保留 Xvfb 和 Fluxbox, 供 Camoufox 在虚拟显示器中运行, 不再安装 VNC 或 noVNC。
 
 ## cloudflared
 
@@ -61,26 +60,28 @@ CLOUDFLARED_TUNNEL_ENABLE=0
 ```bash
 docker run --rm \
   --env-file .env \
-  -e VNC_PASSWORD='change-me' \
+  -e SSH_PASSWORD='change-me' \
   -e CLOUDFLARED_TUNNEL_ENABLE=1 \
   -e CLOUDFLARED_TUNNEL_TOKEN='token' \
   -p 8000:8000 \
   qiankun:local
 ```
 
+在 Cloudflare Tunnel 的 Public Hostname 中将服务类型设置为 `SSH`, URL 设置为 `localhost:22`。
+
 使用 quick tunnel:
 
 ```bash
 docker run --rm \
   --env-file .env \
-  -e VNC_PASSWORD='change-me' \
+  -e SSH_PASSWORD='change-me' \
   -e CLOUDFLARED_TUNNEL_ENABLE=1 \
-  -e CLOUDFLARED_TUNNEL_URL='http://127.0.0.1:15902' \
+  -e CLOUDFLARED_TUNNEL_URL='ssh://localhost:22' \
   -p 8000:8000 \
   qiankun:local
 ```
 
-quick tunnel 会生成公开访问地址, 只应在明确需要远程访问 noVNC 时启用。
+`CLOUDFLARED_TUNNEL_URL` 默认值就是 `ssh://localhost:22`. quick tunnel 会生成公开访问地址, 客户端需通过 cloudflared 建立 SSH 连接。
 
 ## 健康检查
 
@@ -96,5 +97,12 @@ GET http://127.0.0.1:${PORT}/api/health
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `NOVNC_VERSION` | `1.7.0` | noVNC 版本 |
 | `TARGETARCH` | 自动检测 | cloudflared 架构, 支持 `amd64` 和 `arm64` |
+
+## 运行参数
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `SSH_PASSWORD` | `12345678` | `root` 用户密码, 生产环境必须修改 |
+| `CLOUDFLARED_TUNNEL_ENABLE` | `0` | 设置为 `1` 时启动 cloudflared tunnel |
+| `CLOUDFLARED_TUNNEL_URL` | `ssh://localhost:22` | quick tunnel 转发目标 |

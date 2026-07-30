@@ -12,7 +12,6 @@ RUN test -f /build/dist/index.html
 FROM oxzk/python
 
 ARG TARGETARCH
-ARG NOVNC_VERSION=1.7.0
 
 WORKDIR /app
 
@@ -24,15 +23,13 @@ ENV DISPLAY=:99 \
     UV_LINK_MODE=copy \
     DEBIAN_FRONTEND=noninteractive \
     XVFB_WHD=1920x1080x24 \
-    VNC_PORT=5900 \
-    NOVNC_PORT=15902 \
+    SSH_PASSWORD=12345678 \
     PORT=8000 \
-    CLOUDFLARED_TUNNEL_ENABLE=0 \
-    CLOUDFLARED_TUNNEL_URL=http://127.0.0.1:15902
+    CLOUDFLARED_TUNNEL_ENABLE=0
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# 安装 Camoufox 图形运行、VNC、noVNC 与 cloudflared 所需的系统依赖。
+# 安装 Camoufox 图形运行、OpenSSH Server 与 cloudflared 所需的系统依赖。
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
@@ -44,18 +41,18 @@ RUN set -eux; \
         libasound2 \
         libgtk-3-0 \
         libx11-xcb1 \
+        openssh-server \
         procps \
-        x11vnc \
         xvfb; \
+    echo 'root:12345678' | chpasswd; \
+    install -d -m 0755 /run/sshd; \
+    rm -f /etc/ssh/ssh_host_*; \
     rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock README.md LICENSE /app/
 
-# 安装 noVNC 与 cloudflared。
+# 安装 cloudflared。
 RUN set -eux; \
-    mkdir -p /opt/noVNC; \
-    curl -fsSL "https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSION}.tar.gz" \
-        | tar -xz --strip-components=1 -C /opt/noVNC; \
     build_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     case "${build_arch}" in \
         amd64) cloudflared_arch="amd64" ;; \
@@ -65,8 +62,6 @@ RUN set -eux; \
     curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cloudflared_arch}" \
         -o /usr/local/bin/cloudflared; \
     chmod +x /usr/local/bin/cloudflared
-
-COPY docker/novnc-index.html /opt/noVNC/index.html
 
 RUN mkdir -p /app/user_data
 
@@ -86,7 +81,7 @@ COPY docker/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 15902 8000
+EXPOSE 22 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -fsS "http://127.0.0.1:${PORT}/api/health" || exit 1

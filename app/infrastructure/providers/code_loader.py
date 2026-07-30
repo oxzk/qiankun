@@ -19,6 +19,7 @@ from app.provider_plugins.base import (
     BaseBrowserProvider,
     BaseCamoufox,
     BaseProvider,
+    BrowserDriver,
     find_single_provider_class,
 )
 from app.provider_plugins.contracts import (
@@ -291,6 +292,7 @@ class ProviderCodeLoader:
             "BaseProvider": BaseProvider,
             "BaseBrowserProvider": BaseBrowserProvider,
             "BaseCamoufox": BaseCamoufox,
+            "BrowserDriver": BrowserDriver,
             "BrowserProviderConfig": BrowserProviderConfig,
             "ProviderConfig": ProviderConfig,
             "ProviderContext": ProviderContext,

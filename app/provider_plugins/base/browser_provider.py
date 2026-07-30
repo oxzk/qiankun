@@ -3,37 +3,48 @@
 from __future__ import annotations
 
 import shutil
-import time
 from abc import abstractmethod
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import ClassVar
 
-from pydantic import ValidationError
-
+from app.provider_plugins.base.browser import BrowserDriver
 from app.provider_plugins.base.camoufox import BaseCamoufox
+from app.provider_plugins.base.dom_actions import DomActionsMixin
 from app.provider_plugins.base.provider import BaseProvider
-from app.provider_plugins.base.turnstile import TurnstileDetector, TurnstileHandler
+from app.provider_plugins.base.turnstile import TurnstileDetector, TurnstileHandler, TurnstileSnapshot
 from app.provider_plugins.contracts import (
     BrowserProviderConfig,
     ProviderConfig,
     ProviderResult,
 )
 
+BrowserFactory = Callable[[], BrowserDriver]
+"""浏览器驱动工厂类型, 默认生产 ``BaseCamoufox``。"""
 
-class BaseBrowserProvider(BaseProvider):
+
+class BaseBrowserProvider(DomActionsMixin, BaseProvider):
     """浏览器 Provider 基类。
 
-    封装配置校验、Camoufox 启动/关闭、Turnstile 处理、
-    通用 DOM 等待与失败截图。子类实现 ``execute_with_browser`` 即可。
+    封装 ``BrowserDriver`` 启动/关闭、Turnstile 处理、DOM 等待与失败截图.
+    配置校验由 ``BaseProvider.run`` 完成; 子类实现 ``execute_with_browser``.
     """
 
     config_schema: ClassVar[type[BrowserProviderConfig]] = BrowserProviderConfig
     launch_options: ClassVar[dict[str, object]] = {}
-    CHECK_IN_SUCCESS: ClassVar[str] = "签到成功"
-    CHECK_IN_ALREADY_DONE: ClassVar[str] = "今日已签到"
-    CHECK_IN_NOT_FOUND: ClassVar[str] = "未找到签到按钮"
+    default_wait_load_state: ClassVar[str | None] = "load"
+    screenshot_keep: ClassVar[int] = 20
     ELEMENT_POLL_MS: ClassVar[int] = 300
+
+    def __init__(
+        self,
+        requester: object | None = None,
+        browser_factory: BrowserFactory | None = None,
+    ) -> None:
+        """初始化浏览器 Provider。"""
+        super().__init__(requester=requester)  # type: ignore[arg-type]
+        self._browser_factory: BrowserFactory = browser_factory or BaseCamoufox
 
     @property
     def data_dir(self) -> Path:
@@ -46,23 +57,14 @@ class BaseBrowserProvider(BaseProvider):
         return self.data_dir / "screenshots"
 
     async def execute(self, config: ProviderConfig) -> ProviderResult:
-        """校验配置、启动浏览器并执行子类业务流程。"""
-        try:
-            provider_config = self.config_schema.model_validate(config)
-        except ValidationError as exc:
-            message = self._format_config_error(exc)
-            self.log(message)
-            return ProviderResult.fail(
-                message=message,
-                data={"error": type(exc).__name__},
-            )
-
-        self._clean_screenshot_dir()
-        browser = BaseCamoufox()
+        """启动浏览器并执行子类业务流程 (config 已校验)。"""
+        provider_config = config if isinstance(config, BrowserProviderConfig) else self.config_schema.model_validate(config)
+        self._rotate_screenshots()
+        browser = self._browser_factory()
         try:
             headless = provider_config.resolve_headless()
             self.log(
-                "启动 Camoufox: "
+                "启动浏览器: "
                 f"target={self._format_browser_target(provider_config)}, "
                 f"headless={provider_config.headless}, "
                 f"user_data_dir={provider_config.user_data_dir or '禁用'}"
@@ -89,45 +91,43 @@ class BaseBrowserProvider(BaseProvider):
     @abstractmethod
     async def execute_with_browser(
         self,
-        browser: BaseCamoufox,
+        browser: BrowserDriver,
         provider_config: BrowserProviderConfig,
     ) -> ProviderResult:
         """执行子类浏览器业务流程。"""
 
     async def handle_browser_exception(
         self,
-        browser: BaseCamoufox,
+        browser: BrowserDriver,
         exc: Exception,
         provider_config: BrowserProviderConfig,
     ) -> ProviderResult:
         """处理浏览器业务异常, 并尝试保存失败截图。"""
-        del provider_config  # 预留扩展点, 子类可覆盖使用。
+        del provider_config
         message = f"{self.name} 浏览器任务执行失败: {type(exc).__name__}"
         self.log(f"{message}: {exc}")
         data: dict[str, object] = {"error": str(exc)}
         try:
-            data["url"] = browser.current_url()
-        except Exception:
-            pass
-        try:
             data["title"] = await browser.title()
-            self.log(f"页面标题: {data['title']}")
+            self.log(f"失败页标题: {data['title']}", log_type="system")
         except Exception:
             pass
-        screenshot = await self.save_screenshot(browser, reason="browser_error")
-        if screenshot:
-            data["screenshot"] = screenshot
-        return ProviderResult.fail(message=message, data=data)
+        return await self.fail_with_screenshot(
+            browser,
+            message=message,
+            reason="browser_error",
+            data=data,
+        )
 
     async def fail_with_screenshot(
         self,
-        browser: BaseCamoufox,
+        browser: BrowserDriver,
         *,
         message: str,
         reason: str,
         data: dict[str, object] | None = None,
     ) -> ProviderResult:
-        """构造失败结果并附带截图路径。"""
+        """构造失败结果并附带截图路径与当前 URL。"""
         payload: dict[str, object] = dict(data or {})
         try:
             payload.setdefault("url", browser.current_url())
@@ -140,9 +140,11 @@ class BaseBrowserProvider(BaseProvider):
 
     async def save_screenshot(
         self,
-        browser: BaseCamoufox,
+        browser: BrowserDriver,
         reason: str,
         prefix: str | None = None,
+        *,
+        full_page: bool = False,
     ) -> str:
         """保存当前页面截图, 失败时返回空字符串。"""
         try:
@@ -150,47 +152,68 @@ class BaseBrowserProvider(BaseProvider):
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             file_prefix = prefix or self.name
             path = self.screenshot_dir / f"{file_prefix}_{reason}_{timestamp}.png"
-            await browser.screenshot(str(path))
-            self.log(f"已保存截图: {path}")
+            await browser.screenshot(str(path), full_page=full_page)
+            self.log(f"已保存截图: {path}", log_type="system")
+            self._rotate_screenshots()
             return str(path)
         except Exception as exc:
-            self.log(f"保存截图失败: {exc}")
+            self.log(f"保存截图失败: {exc}", log_type="system")
             return ""
 
-    async def is_turnstile_visible(self, browser: BaseCamoufox) -> bool:
-        """检测页面是否存在可见 Turnstile。"""
-        detector = TurnstileDetector(browser.latest_page(), log_func=self.log)
-        try:
-            snapshot = await detector.detect()
-            self.log(f"Turnstile 检测结果: present={snapshot.present}, visible={snapshot.visible}, rect={snapshot.rect}, source={snapshot.source}, target_kind={snapshot.target_kind}")
-        except Exception as exc:
-            self.log(f"Turnstile 检测异常: {exc}")
-            return False
-        return snapshot.visible
+    def _turnstile_log(self, message: object, *args: object, **kwargs: object) -> None:
+        """Turnstile 底层细节以系统日志输出。"""
+        del args, kwargs
+        self.log(message if isinstance(message, str) else str(message), log_type="system")
 
-    async def handle_visible_turnstile(self, browser: BaseCamoufox) -> bool:
-        """仅在 Turnstile 可见时处理验证。"""
-        page = browser.latest_page()
-        detector = TurnstileDetector(page, log_func=self.log)
-        try:
-            snapshot = await detector.detect()
-        except Exception as exc:
-            self.log(f"Turnstile 检测异常, 跳过处理: {exc}")
-            return False
-
-        if not snapshot.visible:
-            self.log("Turnstile 未显示, 跳过处理")
-            return False
-
-        self.log(
-            "检测到可见 Turnstile, "
-            f"target={snapshot.target_kind}, source={snapshot.source}"
+    async def detect_turnstile(self, browser: BrowserDriver) -> TurnstileSnapshot:
+        """检测 Turnstile 并记录快照日志。"""
+        detector = TurnstileDetector(browser.latest_page(), log_func=self._turnstile_log)
+        snapshot = await detector.detect()
+        rect = snapshot.rect
+        rect_text = (
+            f"({rect['x']:.0f},{rect['y']:.0f},{rect['width']:.0f}x{rect['height']:.0f})"
+            if rect is not None
+            else "None"
         )
-        handler = TurnstileHandler(page, detector)
+        self.log(
+            "Turnstile 检测结果: "
+            f"present={snapshot.present}, visible={snapshot.visible}, "
+            f"rect={rect_text}, source={snapshot.source}, "
+            f"target_kind={snapshot.target_kind}",
+            log_type="system",
+        )
+        return snapshot
+
+    async def is_turnstile_visible(self, browser: BrowserDriver) -> bool:
+        """检测页面是否存在可见 Turnstile。"""
         try:
-            handled = await handler.handle()
+            snapshot = await self.detect_turnstile(browser)
         except Exception as exc:
-            self.log(f"Turnstile 处理异常: {exc}")
+            self.log(f"Turnstile 检测异常: {exc}", log_type="system")
+            return False
+        return snapshot.visible or snapshot.rect is not None
+
+    async def handle_visible_turnstile(
+        self,
+        browser: BrowserDriver,
+        *,
+        timeout: float = 45.0,
+        click_interval: float = 10.0,
+        max_clicks: int = 5,
+    ) -> bool:
+        """处理页面 Turnstile (唯一对外入口)。"""
+        page = browser.latest_page()
+        detector = TurnstileDetector(page, log_func=self._turnstile_log)
+        handler = TurnstileHandler(page, detector, log_func=self._turnstile_log)
+        try:
+            handled = await handler.handle(
+                timeout=timeout,
+                click_interval=click_interval,
+                max_clicks=max_clicks,
+            )
+        except Exception as exc:
+            self.log(f"Turnstile 处理异常: {exc}", log_type="system")
+            self.log("Turnstile 处理异常")
             return False
 
         if handled:
@@ -201,49 +224,51 @@ class BaseBrowserProvider(BaseProvider):
 
     async def open_url(
         self,
-        browser: BaseCamoufox,
+        browser: BrowserDriver,
         url: str,
         *,
         wait_until: str = "domcontentloaded",
-        wait_load_state: str | None = "load",
-    ) -> str:
-        """打开指定地址并等待页面加载完成, 返回当前 URL。
+        wait_load_state: str | None | object = ...,
+        load_state_timeout_ms: float | None = 15_000,
+    ) -> None:
+        """打开指定地址并等待页面加载完成。"""
+        state: str | None
+        if wait_load_state is ...:
+            state = self.default_wait_load_state
+        else:
+            state = wait_load_state  # type: ignore[assignment]
 
-        Args:
-            browser: 已启动的浏览器实例.
-            url: 目标地址.
-            wait_until: ``goto`` 完成条件, 默认 ``domcontentloaded``.
-            wait_load_state: 额外等待的加载状态; 传 ``None`` 跳过.
-        """
         self.log(f"打开页面: {url}")
         await browser.goto(url, wait_until=wait_until)
-        if wait_load_state:
-            await browser.wait_for_load_state(wait_load_state)
-        current = browser.current_url()
-        self.log(f"页面已加载: {current}")
-        return current
+        if not state:
+            return
+        try:
+            await browser.wait_for_load_state(
+                state,  # type: ignore[arg-type]
+                timeout=load_state_timeout_ms,
+            )
+        except Exception as exc:
+            self.log(
+                f"wait_for_load_state({state}) 未完成: "
+                f"{type(exc).__name__}: {exc}",
+                log_type="system",
+            )
 
     async def open_url_and_check(
         self,
-        browser: BaseCamoufox,
+        browser: BrowserDriver,
         url: str,
-        keyword: str,
+        keyword: str | Sequence[str],
         *,
         wait_until: str = "domcontentloaded",
-        wait_load_state: str | None = "networkidle",
+        wait_load_state: str | None | object = ...,
         timeout_ms: int = 15_000,
         case_insensitive: bool = True,
     ) -> bool:
-        """打开指定地址, 再通过 ``wait_for_url`` 判断当前 URL 是否包含关键词。
+        """打开地址并等待 URL 命中任一关键词, 返回是否命中。
 
-        Args:
-            browser: 已启动的浏览器实例.
-            url: 目标地址.
-            keyword: 加载完成后 URL 中需包含的关键词.
-            wait_until: ``goto`` 完成条件.
-            wait_load_state: 额外等待的加载状态, 默认 ``networkidle``; 传 ``None`` 跳过.
-            timeout_ms: 等待 URL 包含关键词的最长毫秒数.
-            case_insensitive: 是否忽略大小写, 默认 True.
+        ``keyword`` 可传多个落地关键词 (如 login 与 daily-checkin),
+        任一命中即结束等待, 避免已登录场景空等超时.
         """
         await self.open_url(
             browser,
@@ -251,67 +276,74 @@ class BaseBrowserProvider(BaseProvider):
             wait_until=wait_until,
             wait_load_state=wait_load_state,
         )
-        needle = keyword.lower() if case_insensitive else keyword
 
-        def _match(current: str) -> bool:
-            haystack = current.lower() if case_insensitive else current
-            return needle in haystack
+        def _norm(text: str) -> str:
+            return text.lower() if case_insensitive else text
 
-        try:
-            await browser.wait_for_url(_match, timeout=timeout_ms)
-            matched = True
-        except Exception as exc:
-            if type(exc).__name__ not in {"TimeoutError", "Error", "TargetClosedError"}:
-                self.log(f"wait_for_url 异常: {type(exc).__name__}: {exc}")
-            current = browser.current_url()
-            haystack = current.lower() if case_insensitive else current
-            matched = needle in haystack
-        return matched
-
-    async def wait_for_any_selector(
-        self,
-        browser: BaseCamoufox,
-        selectors: tuple[str, ...],
-        *,
-        timeout_ms: int,
-    ) -> bool:
-        """轮询等待任一选择器可见。"""
-        deadline = time.monotonic() + timeout_ms / 1000
-        while time.monotonic() < deadline:
-            for selector in selectors:
-                if await self.is_selector_visible(browser, selector):
-                    return True
-            await browser.wait_for_timeout(self.ELEMENT_POLL_MS)
-        for selector in selectors:
-            if await self.is_selector_visible(browser, selector):
-                return True
-        return False
-
-    async def is_selector_visible(self, browser: BaseCamoufox, selector: str) -> bool:
-        """判断选择器对应首个元素是否可见。"""
-        try:
-            locator = browser.locator(selector).first
-            count = await locator.count()
-            if count <= 0:
-                return False
-            return bool(await locator.is_visible())
-        except Exception:
+        if isinstance(keyword, str):
+            raw_keywords: Sequence[str] = (keyword,)
+        else:
+            raw_keywords = keyword
+        needles = [_norm(item) for item in raw_keywords if str(item).strip()]
+        if not needles:
+            self.log("URL 检查: 未提供有效 keyword", log_type="system")
             return False
 
-    def _clean_screenshot_dir(self) -> None:
-        """清理当前 Provider 历史截图, 避免干扰本次排查。"""
+        def _matched_any(current: str) -> bool:
+            haystack = _norm(current)
+            return any(needle in haystack for needle in needles)
+
+        current = browser.current_url()
+        if not _matched_any(current):
+            try:
+                await browser.wait_for_url(_matched_any, timeout=timeout_ms)
+            except Exception as exc:
+                if type(exc).__name__ not in {"TimeoutError", "Error", "TargetClosedError"}:
+                    self.log(
+                        f"wait_for_url 异常: {type(exc).__name__}: {exc}",
+                        log_type="system",
+                    )
+            current = browser.current_url()
+
+        matched = _matched_any(current)
+        self.log(
+            f"URL 检查: keywords={list(needles)!r}, matched={matched}, url={current}",
+            log_type="system",
+        )
+        return matched
+
+    def _rotate_screenshots(self) -> None:
+        """按 mtime 仅保留最近 ``screenshot_keep`` 张截图。"""
         screenshot_dir = self.screenshot_dir
         if not screenshot_dir.exists():
             return
-        for child in screenshot_dir.iterdir():
+        keep = max(0, int(self.screenshot_keep))
+        files = [
+            path
+            for path in screenshot_dir.iterdir()
+            if path.is_file() and not path.is_symlink()
+        ]
+        if keep <= 0:
+            for path in files:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as exc:
+                    self.log(f"清理截图失败: {path}: {exc}", log_type="system")
+            return
+        if len(files) <= keep:
+            return
+        files.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+        for path in files[keep:]:
             try:
-                if child.is_dir() and not child.is_symlink():
-                    shutil.rmtree(child)
-                else:
-                    child.unlink(missing_ok=True)
+                path.unlink(missing_ok=True)
             except OSError as exc:
-                self.log(f"清理截图失败: {child}: {exc}")
-        self.log(f"已清理截图目录: {screenshot_dir}")
+                self.log(f"清理截图失败: {path}: {exc}", log_type="system")
+        for child in screenshot_dir.iterdir():
+            if child.is_dir() and not child.is_symlink():
+                try:
+                    shutil.rmtree(child)
+                except OSError as exc:
+                    self.log(f"清理截图目录失败: {child}: {exc}", log_type="system")
 
     def _format_browser_target(self, provider_config: BrowserProviderConfig) -> str:
         """格式化浏览器启动日志中的目标地址。"""
@@ -320,9 +352,3 @@ class BaseBrowserProvider(BaseProvider):
             if value:
                 return str(value)
         return self.name
-
-    def _format_config_error(self, exc: ValidationError) -> str:
-        """格式化配置校验错误。"""
-        first_error = exc.errors()[0] if exc.errors() else {}
-        message = str(first_error.get("msg") or exc)
-        return f"{self.name} 配置错误: {message}"

@@ -7,11 +7,10 @@ from html import escape
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
-from curl_cffi import requests
 from pydantic import Field, ValidationInfo, field_validator
 
-from app.provider_plugins.base import BaseProvider
-from app.provider_plugins.contracts import ProviderConfig, ProviderResult
+from app.provider_plugins.base.http_checkin import BaseHttpCheckinProvider
+from app.provider_plugins.contracts import ProviderConfig
 
 
 class _InfoBlockExtractor(HTMLParser):
@@ -118,7 +117,7 @@ class PtConfig(ProviderConfig):
         return normalized
 
 
-class PtProvider(BaseProvider):
+class PtProvider(BaseHttpCheckinProvider):
     """PT 站点自动签到和用户信息查询 Provider。"""
 
     name = "pt"
@@ -140,56 +139,36 @@ class PtProvider(BaseProvider):
     )
     """PT 请求使用的浏览器标识。"""
 
-    async def execute(
-        self,
-        config: ProviderConfig,
-    ) -> ProviderResult:
-        """执行签到前查询, 签到和签到后查询流程。"""
-        typed_config = PtConfig.model_validate(config)
-        headers = self._request_headers(typed_config)
-        self.log(
-            f"[{typed_config.username}] PT 站点处理开始, "
-            f"站点 {typed_config.base_url}"
+    def checkin_label(self) -> str:
+        """结果文案前缀。"""
+        return "PT "
+
+    def checkin_username(self, config: ProviderConfig) -> str:
+        """返回账号标识。"""
+        assert isinstance(config, PtConfig)
+        return config.username
+
+    def checkin_site_url(self, config: ProviderConfig) -> str:
+        """返回站点根地址。"""
+        assert isinstance(config, PtConfig)
+        return config.base_url
+
+    async def fetch_status(self, config: ProviderConfig) -> str | None:
+        """查询并解析 PT 账号信息。"""
+        assert isinstance(config, PtConfig)
+        headers = self._request_headers(config)
+        response = await self._http_request(
+            f"{config.base_url}/mybonus.php",
+            headers=headers,
         )
-        try:
-            initial_info = await self._get_user_info(typed_config, headers)
-            self.log(f"[{typed_config.username}] PT 签到前状态: {initial_info}")
+        if config.username not in response.text:
+            raise ValueError("登录状态已失效, 页面中未找到配置账号")
+        return self._parse_user_info(response.text)
 
-            checkin_result = await self._checkin(typed_config, headers)
-            status = self._parse_checkin_result(checkin_result, typed_config.username)
-
-            final_info = await self._get_user_info(typed_config, headers)
-            self.log(f"[{typed_config.username}] PT 签到后状态: {final_info}")
-        except requests.RequestsError as exc:
-            self.log(f"[{typed_config.username}] PT 站点请求失败: {exc}")
-            return ProviderResult.fail(
-                message="PT 站点请求失败",
-                data={"error": str(exc), "site_url": typed_config.base_url},
-            )
-        except ValueError as exc:
-            self.log(f"[{typed_config.username}] PT 站点处理失败: {exc}")
-            return ProviderResult.fail(
-                message="PT 站点处理失败",
-                data={"error": str(exc), "site_url": typed_config.base_url},
-            )
-
-        self.log(f"[{typed_config.username}] PT 站点处理完成, 状态 {status}")
-        return ProviderResult.ok(
-            message=f"PT 站点处理完成: {status}",
-            data={
-                "status": status,
-                "initial_info": initial_info,
-                "final_info": final_info,
-                "site_url": typed_config.base_url,
-            },
-        )
-
-    async def _checkin(
-        self,
-        config: PtConfig,
-        headers: dict[str, str],
-    ) -> str:
+    async def do_checkin(self, config: ProviderConfig) -> str:
         """按站点规则执行签到并返回响应正文。"""
+        assert isinstance(config, PtConfig)
+        headers = self._request_headers(config)
         base_url_lower = config.base_url.lower()
         if "qingwa" in base_url_lower:
             await self._http_request(
@@ -216,19 +195,31 @@ class PtProvider(BaseProvider):
         response = await self._http_request(checkin_url, headers=headers)
         return response.text
 
-    async def _get_user_info(
-        self,
-        config: PtConfig,
-        headers: dict[str, str],
-    ) -> str | None:
-        """查询并解析 PT 账号信息。"""
-        response = await self._http_request(
-            f"{config.base_url}/mybonus.php",
-            headers=headers,
-        )
-        if config.username not in response.text:
-            raise ValueError("登录状态已失效, 页面中未找到配置账号")
-        return self._parse_user_info(response.text)
+    def parse_checkin_status(self, raw: str, config: ProviderConfig) -> str:
+        """解析签到状态和连续签到奖励。"""
+        assert isinstance(config, PtConfig)
+        username = config.username
+        if not raw:
+            self.log(f"[{username}] 签到响应为空")
+            return "签到响应为空"
+
+        if "签到成功" in raw:
+            bonus_match = re.search(
+                r"已连续签到 <b>(\d+)</b> 天, 本次签到获得 <b>(\d+)</b>",
+                raw.replace("，", ","),
+                re.DOTALL,
+            )
+            if bonus_match is not None:
+                bonus = re.sub(r"<[^>]+>", "", bonus_match.group())
+                self.log(f"[{username}] 签到成功: {bonus}")
+                return f"签到成功 - {bonus}"
+            self.log(f"[{username}] 签到成功")
+            return "签到成功"
+
+        if "已经签到" in raw:
+            self.log(f"[{username}] 今日已经签到")
+            return "今日已经签到"
+        return "签到已完成"
 
     def _parse_user_info(self, html: str) -> str | None:
         """从 info_block 中提取上传量, 下载量, 分享率和魔力值。"""
@@ -251,30 +242,6 @@ class PtProvider(BaseProvider):
         if not user_data:
             return "无法解析用户信息"
         return "; ".join(f"{key}: {value}" for key, value in user_data.items())
-
-    def _parse_checkin_result(self, result: str, username: str) -> str:
-        """解析签到状态和连续签到奖励。"""
-        if not result:
-            self.log(f"[{username}] PT 签到响应为空")
-            return "签到响应为空"
-
-        if "签到成功" in result:
-            bonus_match = re.search(
-                r"已连续签到 <b>(\d+)</b> 天, 本次签到获得 <b>(\d+)</b>",
-                result.replace("，", ","),
-                re.DOTALL,
-            )
-            if bonus_match is not None:
-                bonus = re.sub(r"<[^>]+>", "", bonus_match.group())
-                self.log(f"[{username}] PT 签到成功: {bonus}")
-                return f"签到成功 - {bonus}"
-            self.log(f"[{username}] PT 签到成功")
-            return "签到成功"
-
-        if "已经签到" in result:
-            self.log(f"[{username}] PT 今日已经签到")
-            return "今日已经签到"
-        return "签到已完成"
 
     @staticmethod
     def _request_headers(config: PtConfig) -> dict[str, str]:

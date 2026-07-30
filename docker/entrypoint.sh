@@ -97,10 +97,10 @@ wait_for_cloudflared_url() {
 # 配置基础环境。
 export DISPLAY="${DISPLAY:-:99}"
 export XVFB_WHD="${XVFB_WHD:-1920x1080x24}"
-export VNC_PORT="${VNC_PORT:-5900}"
-export NOVNC_PORT="${NOVNC_PORT:-15902}"
+export SSH_PASSWORD="${SSH_PASSWORD:-12345678}"
+export SSH_PORT="${SSH_PORT:-22}"
 export CLOUDFLARED_TUNNEL_ENABLE="${CLOUDFLARED_TUNNEL_ENABLE:-0}"
-export CLOUDFLARED_TUNNEL_URL="${CLOUDFLARED_TUNNEL_URL:-http://127.0.0.1:${NOVNC_PORT}}"
+export CLOUDFLARED_TUNNEL_URL="${CLOUDFLARED_TUNNEL_URL:-ssh://localhost:${SSH_PORT}}"
 
 rm -f "/tmp/.X${DISPLAY#:}-lock"
 
@@ -118,23 +118,30 @@ sleep 1
 start_background "Fluxbox" /tmp/fluxbox.log fluxbox
 sleep 1
 
-VNC_AUTH_ARGS=("-nopw")
-if [[ -n "${VNC_PASSWORD:-}" ]]; then
-    VNC_PASSWORD_FILE="/tmp/x11vnc.pass"
-    x11vnc -storepasswd "${VNC_PASSWORD}" "${VNC_PASSWORD_FILE}" >/tmp/x11vnc-pass.log 2>&1
-    VNC_AUTH_ARGS=("-rfbauth" "${VNC_PASSWORD_FILE}")
-    log "已启用 VNC 密码认证"
-else
-    log "警告: 未设置 VNC_PASSWORD, VNC 将使用无密码认证"
+if [[ -z "${SSH_PASSWORD}" ]]; then
+    log "错误: SSH_PASSWORD 不能为空"
+    exit 1
 fi
 
-start_background "x11vnc: ${VNC_PORT}" /tmp/x11vnc.log \
-    x11vnc -display "${DISPLAY}" -forever "${VNC_AUTH_ARGS[@]}" -rfbport "${VNC_PORT}" -shared
-wait_for_port "x11vnc" "${VNC_PORT}" 30
+printf 'root:%s\n' "${SSH_PASSWORD}" | chpasswd
+install -d -m 0755 /run/sshd
+ssh-keygen -A >/tmp/ssh-keygen.log 2>&1
 
-start_background "noVNC: ${NOVNC_PORT}" /tmp/novnc.log \
-    websockify --web /opt/noVNC "${NOVNC_PORT}" "localhost:${VNC_PORT}"
-wait_for_port "noVNC" "${NOVNC_PORT}" 30
+# 使用启动参数约束 SSH 登录能力, 避免依赖额外配置文件。
+SSH_CONFIG_ARGS=(
+    -o "PermitRootLogin=yes"
+    -o "PasswordAuthentication=yes"
+    -o "KbdInteractiveAuthentication=no"
+    -o "AllowUsers=root"
+    -o "X11Forwarding=no"
+    -o "AllowAgentForwarding=no"
+    -o "AllowTcpForwarding=no"
+    -o "PermitTunnel=no"
+)
+
+start_background "OpenSSH Server: ${SSH_PORT}" /tmp/sshd.log \
+    /usr/sbin/sshd -D -e -p "${SSH_PORT}" "${SSH_CONFIG_ARGS[@]}"
+wait_for_port "OpenSSH Server" "${SSH_PORT}" 30
 
 if [[ "${CLOUDFLARED_TUNNEL_ENABLE}" == "1" ]]; then
     if [[ -n "${CLOUDFLARED_TUNNEL_TOKEN:-}" ]]; then
@@ -149,11 +156,11 @@ fi
 
 if [[ $# -eq 0 ]]; then
     log "未提供自定义命令, 容器将保持运行"
-    touch /tmp/xvfb.log /tmp/fluxbox.log /tmp/x11vnc.log /tmp/novnc.log /tmp/cloudflared.log
-    tail -f /tmp/xvfb.log /tmp/fluxbox.log /tmp/x11vnc.log /tmp/novnc.log /tmp/cloudflared.log
+    touch /tmp/xvfb.log /tmp/fluxbox.log /tmp/sshd.log /tmp/cloudflared.log
+    tail -f /tmp/xvfb.log /tmp/fluxbox.log /tmp/sshd.log /tmp/cloudflared.log
 fi
 
-log "noVNC 已就绪: http://127.0.0.1:${NOVNC_PORT}/"
+log "OpenSSH Server 已就绪: root@127.0.0.1:${SSH_PORT}"
 log "执行自定义命令: $*"
 "$@" &
 MAIN_PID="$!"
