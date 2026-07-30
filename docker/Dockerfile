@@ -44,9 +44,6 @@ RUN set -eux; \
         openssh-server \
         procps \
         xvfb; \
-    echo 'root:12345678' | chpasswd; \
-    install -d -m 0755 /run/sshd; \
-    rm -f /etc/ssh/ssh_host_*; \
     rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock README.md LICENSE /app/
@@ -74,7 +71,11 @@ RUN test -f /app/public/index.html
 # 安装项目依赖、Camoufox 依赖与浏览器文件。
 RUN --mount=type=cache,target=/root/.cache/uv \
     set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends build-essential; \
     uv sync --frozen --no-dev --no-editable; \
+    apt-get purge -y --auto-remove build-essential; \
+    rm -rf /var/lib/apt/lists/*; \
     python -m camoufox fetch
 
 COPY docker/entrypoint.sh /entrypoint.sh
