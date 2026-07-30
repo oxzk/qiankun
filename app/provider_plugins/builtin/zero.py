@@ -50,7 +50,6 @@ class CheckinPageSnapshot:
     """签到页 DOM 快照。"""
 
     balance: str | None
-    already_checked_in: bool
     has_spin_button: bool
     spin_disabled: bool
 
@@ -72,10 +71,6 @@ class ZeroProvider(BaseBrowserProvider):
     LOGIN_URL_KEYWORD: ClassVar[str] = "login"
     PAGE_LANDING_KEYWORDS: ClassVar[tuple[str, ...]] = ("login",)
     BALANCE_LABELS: ClassVar[tuple[str, ...]] = ("Current Balance", "当前余额")
-    ALREADY_CHECKED_IN_TEXTS: ClassVar[tuple[str, ...]] = (
-        "already checked in",
-        "已经签到",
-    )
 
     CHECK_IN_SUCCESS: ClassVar[str] = "签到成功"
     CHECK_IN_ALREADY_DONE: ClassVar[str] = "今日已签到"
@@ -86,6 +81,7 @@ class ZeroProvider(BaseBrowserProvider):
     PAGE_READY_TIMEOUT_MS: ClassVar[int] = 15_000
     LOGIN_SUCCESS_TIMEOUT_MS: ClassVar[int] = 20_000
     CHECK_IN_RESULT_TIMEOUT_MS: ClassVar[int] = 12_000
+    INITIAL_SPIN_DISABLED_RECHECK_MS: ClassVar[int] = 2_000
     SELECTOR_TIMEOUT_MS: ClassVar[int] = 10_000
 
     async def execute_with_browser(
@@ -252,21 +248,19 @@ class ZeroProvider(BaseBrowserProvider):
         """执行签到并返回结构化结果。"""
         snapshot = await self._ensure_checkin_snapshot(browser)
         before = snapshot.balance
-        if snapshot.already_checked_in:
-            self.log(f"页面显示今日已签到, 余额 {before or '-'}")
-        elif snapshot.spin_disabled:
+        if snapshot.spin_disabled:
             self.log(f"签到按钮不可用, 视为已签到, 余额 {before or '-'}")
         elif snapshot.has_spin_button:
             self.log(f"可以签到, 当前余额 {before or '-'}")
         else:
             self.log(f"未找到签到按钮, 当前余额 {before or '-'}")
 
-        if snapshot.already_checked_in or snapshot.spin_disabled:
+        if snapshot.spin_disabled:
             return CheckInResult(before, snapshot.balance or before, self.CHECK_IN_ALREADY_DONE)
         if not snapshot.has_spin_button:
             return CheckInResult(before, snapshot.balance or before, self.CHECK_IN_NOT_FOUND)
 
-        button = await self.wait_for_selector_click(
+        await self.wait_for_selector_click(
             browser,
             self.SPIN_BUTTON_SELECTOR,
             timeout_ms=self.SELECTOR_TIMEOUT_MS,
@@ -274,15 +268,17 @@ class ZeroProvider(BaseBrowserProvider):
         self.log("已点击签到, 等待结果")
         after, status = await self._confirm_check_in_result(
             browser,
-            button=button,
             before_points=before,
         )
         return CheckInResult(before, after, status)
 
     async def _ensure_checkin_snapshot(self, browser: BrowserDriver) -> CheckinPageSnapshot:
-        """读取签到页快照; 若无按钮且未声明已签到则短等后再读一次。"""
+        """读取签到页快照, 排除按钮短暂禁用的加载状态。"""
         snapshot = await self._read_checkin_snapshot(browser)
-        if snapshot.already_checked_in or snapshot.has_spin_button:
+        if snapshot.spin_disabled:
+            await browser.wait_for_timeout(self.INITIAL_SPIN_DISABLED_RECHECK_MS)
+            return await self._read_checkin_snapshot(browser)
+        if snapshot.has_spin_button:
             return snapshot
         await self.wait_for_any_selector(
             browser,
@@ -295,69 +291,43 @@ class ZeroProvider(BaseBrowserProvider):
         self,
         browser: BrowserDriver,
         *,
-        button: object,
         before_points: str | None,
     ) -> tuple[str | None, str]:
-        """轮询确认签到结果。"""
+        """轮询签到页快照确认签到结果。"""
         deadline = time.monotonic() + self.CHECK_IN_RESULT_TIMEOUT_MS / 1000
         while time.monotonic() < deadline:
-            judged = await self._judge_check_in(
-                browser,
-                button=button,
-                before_points=before_points,
-            )
-            if judged is not None:
-                return judged
+            snapshot = await self._read_checkin_snapshot(browser)
+            current = snapshot.balance
+            if snapshot.spin_disabled:
+                self.log(f"签到完成 (按钮已禁用), 余额 {current or before_points or '-'}")
+                return current or before_points, self.CHECK_IN_SUCCESS
+            if before_points is not None and current is not None and current != before_points:
+                self.log(f"签到完成 (余额变化 {before_points} -> {current})")
+                return current, self.CHECK_IN_SUCCESS
             await browser.wait_for_timeout(self.ELEMENT_POLL_MS)
 
-        judged = await self._judge_check_in(
-            browser,
-            button=button,
-            before_points=before_points,
-        )
-        if judged is not None:
-            return judged
         snapshot = await self._read_checkin_snapshot(browser)
+        if snapshot.spin_disabled:
+            self.log(f"签到完成 (按钮已禁用), 余额 {snapshot.balance or before_points or '-'}")
+            return snapshot.balance or before_points, self.CHECK_IN_SUCCESS
+        if before_points is not None and snapshot.balance is not None and snapshot.balance != before_points:
+            self.log(f"签到完成 (余额变化 {before_points} -> {snapshot.balance})")
+            return snapshot.balance, self.CHECK_IN_SUCCESS
         self.log(
             f"签到未确认: 按钮仍可点且余额未变 "
             f"({before_points or '-'} -> {snapshot.balance or '-'})"
         )
         return snapshot.balance or before_points, self.CHECK_IN_UNCONFIRMED
 
-    async def _judge_check_in(
-        self,
-        browser: BrowserDriver,
-        *,
-        button: object,
-        before_points: str | None,
-    ) -> tuple[str | None, str] | None:
-        """判定签到是否完成; 未完成返回 None。"""
-        snapshot = await self._read_checkin_snapshot(browser)
-        current = snapshot.balance
-        try:
-            disabled = bool(await button.is_disabled())  # type: ignore[attr-defined]
-        except Exception:
-            disabled = snapshot.spin_disabled
-
-        if disabled or snapshot.already_checked_in:
-            reason = "按钮已禁用" if disabled else "页面显示已签到"
-            self.log(f"签到完成 ({reason}), 余额 {current or before_points or '-'}")
-            return current or before_points, self.CHECK_IN_SUCCESS
-        if before_points is not None and current is not None and current != before_points:
-            self.log(f"签到完成 (余额变化 {before_points} -> {current})")
-            return current, self.CHECK_IN_SUCCESS
-        return None
-
     async def _read_checkin_snapshot(self, browser: BrowserDriver) -> CheckinPageSnapshot:
-        """一次 evaluate 读取余额 / 已签到 / 抽奖按钮状态。"""
+        """一次 evaluate 读取余额与抽奖按钮状态。"""
         try:
             raw = await browser.evaluate(
-                """({ heroSelector, spinSelector, balanceLabels, alreadyTexts }) => {
+                """({ heroSelector, spinSelector, balanceLabels }) => {
                     const norm = (v) => String(v || "").trim();
                     const lower = (v) => norm(v).toLowerCase();
                     const hero = document.querySelector(heroSelector);
                     const heroText = hero ? String(hero.innerText || "") : "";
-                    const heroLower = heroText.toLowerCase();
 
                     let balance = "";
                     if (hero) {
@@ -381,9 +351,6 @@ class ZeroProvider(BaseBrowserProvider):
                         }
                     }
 
-                    const already = (alreadyTexts || [])
-                        .map((x) => lower(x))
-                        .some((item) => item && heroLower.includes(item));
                     const spin = document.querySelector(spinSelector);
                     const hasSpin = Boolean(spin);
                     const spinDisabled = hasSpin && Boolean(
@@ -394,7 +361,6 @@ class ZeroProvider(BaseBrowserProvider):
                     );
                     return {
                         balance,
-                        already_checked_in: already,
                         has_spin_button: hasSpin,
                         spin_disabled: spinDisabled,
                     };
@@ -403,17 +369,15 @@ class ZeroProvider(BaseBrowserProvider):
                     "heroSelector": self.CHECKIN_HERO_SELECTOR,
                     "spinSelector": self.SPIN_BUTTON_SELECTOR,
                     "balanceLabels": list(self.BALANCE_LABELS),
-                    "alreadyTexts": list(self.ALREADY_CHECKED_IN_TEXTS),
                 },
             )
         except Exception as exc:
             self.log(f"读取签到页状态失败: {type(exc).__name__}: {exc}", log_type="system")
-            return CheckinPageSnapshot(None, False, False, False)
+            return CheckinPageSnapshot(None, False, False)
 
         raw = raw or {}
         return CheckinPageSnapshot(
             balance=self._normalize_balance(raw.get("balance")),
-            already_checked_in=bool(raw.get("already_checked_in")),
             has_spin_button=bool(raw.get("has_spin_button")),
             spin_disabled=bool(raw.get("spin_disabled")),
         )
