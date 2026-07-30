@@ -89,14 +89,14 @@ export function TaskDialog({ open, task, loading, enums, onOpenChange, onSubmit 
 
   const providersQuery = useQuery({
     queryKey: queryKeys.providers.options,
-    queryFn: ({ signal }) => providersApi.list({ page: 1, page_size: 500, enabled: true }, signal),
+    queryFn: ({ signal }) => providersApi.list({ page: 1, page_size: 100, enabled: true }, signal),
     enabled: open,
     staleTime: queryStaleTime.catalog,
   });
 
   const notificationsQuery = useQuery({
     queryKey: queryKeys.notifications.options,
-    queryFn: ({ signal }) => notificationsApi.list({ page: 1, page_size: 500 }, signal),
+    queryFn: ({ signal }) => notificationsApi.list({ page: 1, page_size: 100 }, signal),
     enabled: open,
     staleTime: queryStaleTime.catalog,
   });
