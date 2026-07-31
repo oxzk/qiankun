@@ -63,6 +63,7 @@ class ZeroProvider(BaseBrowserProvider):
 
     CHECKIN_URL: ClassVar[str] = "https://api.saviour.cc.cd/daily-checkin"
     EMAIL_SELECTOR: ClassVar[str] = "input[type='email']"
+    AGREE_CONTINUE_SELECTOR: ClassVar[str] = "button:has-text('同意并继续')"
     AGREEMENT_SELECTOR: ClassVar[str] = "#login-agreement-consent"
     PASSWORD_SELECTOR: ClassVar[str] = "input[type='password']"
     LOGIN_SUBMIT_SELECTOR: ClassVar[str] = "form button[type='submit']"
@@ -197,6 +198,15 @@ class ZeroProvider(BaseBrowserProvider):
 
     async def _login(self, browser: BrowserDriver, config: ZeroConfig) -> bool:
         """填写表单并登录, 成功返回 True, 仍停登录页返回 False。"""
+        try:
+            await self.wait_for_selector_click(
+                browser,
+                self.AGREE_CONTINUE_SELECTOR,
+                timeout_ms=3_000,
+            )
+        except Exception:
+            pass
+
         # 协议勾选可选: 页面无该节点时跳过.
         agreement = await self.wait_for_selector(
             browser,
@@ -298,23 +308,17 @@ class ZeroProvider(BaseBrowserProvider):
         while time.monotonic() < deadline:
             snapshot = await self._read_checkin_snapshot(browser)
             current = snapshot.balance
-            if snapshot.spin_disabled:
-                self.log(f"签到完成 (按钮已禁用), 余额 {current or before_points or '-'}")
-                return current or before_points, self.CHECK_IN_SUCCESS
             if before_points is not None and current is not None and current != before_points:
                 self.log(f"签到完成 (余额变化 {before_points} -> {current})")
                 return current, self.CHECK_IN_SUCCESS
             await browser.wait_for_timeout(self.ELEMENT_POLL_MS)
 
         snapshot = await self._read_checkin_snapshot(browser)
-        if snapshot.spin_disabled:
-            self.log(f"签到完成 (按钮已禁用), 余额 {snapshot.balance or before_points or '-'}")
-            return snapshot.balance or before_points, self.CHECK_IN_SUCCESS
         if before_points is not None and snapshot.balance is not None and snapshot.balance != before_points:
             self.log(f"签到完成 (余额变化 {before_points} -> {snapshot.balance})")
             return snapshot.balance, self.CHECK_IN_SUCCESS
         self.log(
-            f"签到未确认: 按钮仍可点且余额未变 "
+            f"签到未确认: 余额未变化 "
             f"({before_points or '-'} -> {snapshot.balance or '-'})"
         )
         return snapshot.balance or before_points, self.CHECK_IN_UNCONFIRMED

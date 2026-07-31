@@ -75,8 +75,6 @@ class ProviderPayloadFactory:
     ) -> ProviderPayloadValues:
         """将更新请求字段赋值到 Provider 模型并返回归一化值。"""
         values = self.values_from_payload(payload, actor=actor, source="update")
-        self._code_loader.invalidate_cache(provider.name)
-        self._code_loader.invalidate_cache(values.name)
         provider.name = values.name
         provider.code = payload.code
         provider.enabled = payload.enabled

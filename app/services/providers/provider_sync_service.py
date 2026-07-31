@@ -31,8 +31,7 @@ class ProviderSyncService:
                 provider_code = self._code_loader.source_code_for_provider_class(
                     item["provider_class"]
                 )
-                # 同步前校验源码可加载, 并清理旧缓存。
-                self._code_loader.invalidate_cache(provider_name)
+                # 同步前校验源码可加载。
                 self._code_loader.validate_provider_code(provider_name, provider_code)
                 existing = await uow.providers.get_by_name(provider_name)
                 if existing is None:
@@ -48,4 +47,3 @@ class ProviderSyncService:
                 existing.code = provider_code
                 await uow.providers.update(existing)
             await uow.commit()
-

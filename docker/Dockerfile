@@ -11,11 +11,11 @@ RUN test -f /build/dist/index.html
 
 FROM oxzk/python
 
-WORKDIR /app
+WORKDIR /workspace
 
 ENV DISPLAY=:99 \
-    VIRTUAL_ENV=/app/.venv \
-    PATH="/app/.venv/bin:${PATH}" \
+    VIRTUAL_ENV=/workspace/.venv \
+    PATH="/workspace/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -41,15 +41,13 @@ RUN set -eux; \
         xvfb; \
     rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml uv.lock README.md LICENSE /app/
+COPY pyproject.toml uv.lock README.md LICENSE /workspace/
 
-RUN mkdir -p /app/user_data
-
-COPY app /app/app
-COPY migrations /app/migrations
-COPY alembic.ini /app/alembic.ini
-COPY --from=frontend-builder /build/dist /app/public
-RUN test -f /app/public/index.html
+COPY app /workspace/app
+COPY migrations /workspace/migrations
+COPY alembic.ini /workspace/alembic.ini
+COPY --from=frontend-builder /build/dist /workspace/public
+RUN test -f /workspace/public/index.html
 
 # 安装项目依赖、Camoufox 依赖与浏览器文件。
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -64,11 +62,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY docker/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh
-
-EXPOSE 8000
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD curl -fsS "http://127.0.0.1:${PORT}/api/health" || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port \"${PORT}\""]

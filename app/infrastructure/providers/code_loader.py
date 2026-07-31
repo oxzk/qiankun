@@ -141,8 +141,7 @@ class ProviderCodeLoader:
     """数据库代码 Provider 临时文件目录。"""
 
     def __init__(self, sandbox_enabled: bool | None = None) -> None:
-        """初始化 Provider 类缓存。"""
-        self._class_cache: dict[str, type[BaseProvider]] = {}
+        """初始化 Provider 代码加载器。"""
         self._sandbox_enabled = (
             settings.provider_code_sandbox if sandbox_enabled is None else sandbox_enabled
         )
@@ -155,15 +154,11 @@ class ProviderCodeLoader:
         actor: str | None = None,
         source: str = "runtime",
     ) -> type[BaseProvider]:
-        """从数据库代码临时文件加载唯一 Provider 类，相同代码复用缓存。"""
-        cache_key = self.code_identity(provider_name, code)
-        cached = self._class_cache.get(cache_key)
-        if cached is not None:
-            return cached
-
+        """从数据库代码临时文件加载唯一 Provider 类。"""
+        module_key = self.code_identity(provider_name, code)
         self.validate_provider_code(provider_name, code)
         code_file = self.write_provider_code_file(provider_name, code)
-        module_name = f"{self.CODE_MODULE_PREFIX}.{cache_key}"
+        module_name = f"{self.CODE_MODULE_PREFIX}.{module_key}"
         self.ensure_runtime_package(code_file.parent)
         spec = importlib.util.spec_from_file_location(module_name, code_file)
         if spec is None or spec.loader is None:
@@ -186,11 +181,10 @@ class ProviderCodeLoader:
             raise AppError(f"Provider 代码加载失败: {exc}") from exc
 
         provider_class = find_single_provider_class(module, module_name, label="Provider 代码")
-        self._class_cache[cache_key] = provider_class
         logger.info(
             "Provider 代码已加载: name=%s hash=%s source=%s actor=%s sandbox=%s",
             provider_name,
-            cache_key,
+            module_key,
             source,
             actor or "-",
             self._sandbox_enabled,
@@ -328,16 +322,6 @@ class ProviderCodeLoader:
         if not self._is_allowed_module(name):
             raise ImportError(f"Provider 代码禁止导入模块: {name}")
         return builtins.__import__(name, globals, locals, fromlist, level)
-
-    def invalidate_cache(self, provider_name: str | None = None) -> None:
-        """清理 Provider 类缓存。"""
-        if provider_name is None:
-            self._class_cache.clear()
-            return
-        prefix = f"{self.safe_module_name(provider_name)}_"
-        for key in list(self._class_cache):
-            if key.startswith(prefix):
-                self._class_cache.pop(key, None)
 
     @staticmethod
     def source_code_for_provider_class(provider_class: object) -> str:
