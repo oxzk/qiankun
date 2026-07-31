@@ -229,7 +229,7 @@ class BaseBrowserProvider(DomActionsMixin, BaseProvider):
         *,
         wait_until: str = "domcontentloaded",
         wait_load_state: str | None | object = ...,
-        load_state_timeout_ms: float | None = 15_000,
+        load_state_timeout_ms: float | None = 25_000,
     ) -> None:
         """打开指定地址并等待页面加载完成。"""
         state: str | None
@@ -253,6 +253,15 @@ class BaseBrowserProvider(DomActionsMixin, BaseProvider):
                 f"{type(exc).__name__}: {exc}",
                 log_type="system",
             )
+
+    async def refresh_page(self, browser: BrowserDriver) -> bool:
+        """使用 ``open_url`` 刷新当前页面, 返回是否刷新成功。"""
+        try:
+            await self.open_url(browser, browser.current_url())
+            return True
+        except Exception as exc:
+            self.log(f"刷新页面失败: {type(exc).__name__}: {exc}")
+            return False
 
     async def open_url_and_check(
         self,

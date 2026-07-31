@@ -12,7 +12,6 @@ from pydantic import Field, ValidationInfo, field_validator
 from app.provider_plugins.base import BaseBrowserProvider
 from app.provider_plugins.base.browser import BrowserDriver
 from app.provider_plugins.contracts import BrowserProviderConfig, ProviderResult
-from app.shared.errors import AppError
 
 try:
     from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -78,7 +77,8 @@ class ZeroProvider(BaseBrowserProvider):
     CHECK_IN_NOT_FOUND: ClassVar[str] = "未找到签到按钮"
     CHECK_IN_UNCONFIRMED: ClassVar[str] = "签到结果未确认"
 
-    LOGIN_MAX_ATTEMPTS: ClassVar[int] = 2
+    LOGIN_MAX_ATTEMPTS: ClassVar[int] = 3
+    TURNSTILE_MAX_ATTEMPTS: ClassVar[int] = 3
     PAGE_READY_TIMEOUT_MS: ClassVar[int] = 15_000
     LOGIN_SUCCESS_TIMEOUT_MS: ClassVar[int] = 20_000
     CHECK_IN_RESULT_TIMEOUT_MS: ClassVar[int] = 12_000
@@ -196,8 +196,8 @@ class ZeroProvider(BaseBrowserProvider):
         except PlaywrightTimeoutError:
             return self._is_checkin_url(browser.current_url())
 
-    async def _login(self, browser: BrowserDriver, config: ZeroConfig) -> bool:
-        """填写表单并登录, 成功返回 True, 仍停登录页返回 False。"""
+    async def _prepare_login_form(self, browser: BrowserDriver, config: ZeroConfig) -> None:
+        """处理登录前置弹窗, 协议选项与账号表单。"""
         try:
             await self.wait_for_selector_click(
                 browser,
@@ -207,13 +207,12 @@ class ZeroProvider(BaseBrowserProvider):
         except Exception:
             pass
 
-        # 协议勾选可选: 页面无该节点时跳过.
         agreement = await self.wait_for_selector(
             browser,
             self.AGREEMENT_SELECTOR,
             timeout_ms=self.SELECTOR_TIMEOUT_MS,
         )
-        if agreement is not None:
+        if agreement is not None and not await agreement.is_checked():
             await agreement.click(timeout=self.SELECTOR_TIMEOUT_MS)
 
         await self.wait_for_selector_fill(
@@ -230,28 +229,49 @@ class ZeroProvider(BaseBrowserProvider):
         )
         self.log(f"登录表单已填写 ({config.email})")
 
-        for attempt in range(1, self.LOGIN_MAX_ATTEMPTS + 1):
-            self.log(f"开始登录 ({attempt}/{self.LOGIN_MAX_ATTEMPTS})")
-            if await self.is_turnstile_visible(browser):
-                self.log("存在人机验证, 开始处理")
-                if not await self.handle_visible_turnstile(browser):
-                    if attempt >= self.LOGIN_MAX_ATTEMPTS:
-                        raise AppError("人机验证失败")
-                    self.log("人机验证未通过, 准备重试")
-                    continue
+    async def _handle_login_turnstile(self, browser: BrowserDriver) -> bool:
+        """独立重试登录页人机验证, 返回是否通过。"""
+        if not await self.is_turnstile_visible(browser):
+            return True
 
-            await self.wait_for_selector_click(
-                browser,
-                self.LOGIN_SUBMIT_SELECTOR,
-                timeout_ms=self.SELECTOR_TIMEOUT_MS,
-            )
-            self.log("已提交登录, 等待进入签到页")
-            if await self._wait_for_login_success(browser):
+        for attempt in range(1, self.TURNSTILE_MAX_ATTEMPTS + 1):
+            self.log(f"开始处理人机验证({attempt}/{self.TURNSTILE_MAX_ATTEMPTS})")
+            if await self.handle_visible_turnstile(browser):
                 return True
-            if attempt < self.LOGIN_MAX_ATTEMPTS and await self.is_turnstile_visible(browser):
-                self.log("仍未进入签到页, 将再次处理人机验证后重试")
-                continue
-            break
+            if attempt < self.TURNSTILE_MAX_ATTEMPTS:
+                self.log("人机验证未通过, 准备单独重试")
+
+        self.log("人机验证重试未通过, 终止登录")
+        return False
+
+    async def _submit_login(self, browser: BrowserDriver) -> bool:
+        """提交登录表单并等待进入签到页。"""
+        await self.wait_for_selector_click(
+            browser,
+            self.LOGIN_SUBMIT_SELECTOR,
+            timeout_ms=self.SELECTOR_TIMEOUT_MS,
+        )
+        self.log("已提交登录, 等待进入签到页")
+        return await self._wait_for_login_success(browser)
+
+    async def _login(self, browser: BrowserDriver, config: ZeroConfig) -> bool:
+        """重试完整登录流程, 人机验证失败时立即终止。"""
+        for attempt in range(1, self.LOGIN_MAX_ATTEMPTS + 1):
+            try:
+                await self._prepare_login_form(browser, config)
+                if not await self._handle_login_turnstile(browser):
+                    return False
+                if await self._submit_login(browser):
+                    return True
+            except Exception as exc:
+                if attempt >= self.LOGIN_MAX_ATTEMPTS:
+                    raise
+                self.log(f"登录失败, 准备重试: {type(exc).__name__}: {exc}")
+            else:
+                if attempt >= self.LOGIN_MAX_ATTEMPTS:
+                    return False
+                self.log("登录失败, 准备重试")
+            await self.refresh_page(browser)
         return False
 
     async def _check_in(self, browser: BrowserDriver) -> CheckInResult:
