@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { TooltipIconButton } from "@/components/common/tooltip-icon-button";
 
 export interface CodeBlockProps {
   /**
@@ -52,20 +52,20 @@ export function CodeBlock({
   return (
     <div className="relative">
       {canCopy ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="absolute right-2 top-2 h-7 px-2"
-          onClick={() => {
-            void handleCopy();
-          }}
-        >
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-          {copied ? "已复制" : "复制"}
-        </Button>
+        <div className="absolute right-2 top-2 z-10">
+          <TooltipIconButton
+            label={copied ? "已复制" : "复制"}
+            variant="outline"
+            className="h-7 w-7"
+            onClick={() => {
+              void handleCopy();
+            }}
+          >
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          </TooltipIconButton>
+        </div>
       ) : null}
-      <pre className={cn("code-block", canCopy && "pr-20", className)}>{text}</pre>
+      <pre className={cn("code-block", canCopy && "pr-10", className)}>{text}</pre>
     </div>
   );
 }

@@ -12,7 +12,7 @@ import { usePagination } from "@/hooks/use-pagination";
 import { useToastMutation } from "@/hooks/use-toast-mutation";
 import { useUrlParamsWriter, useUrlStringParam } from "@/hooks/use-url-state";
 import { executionsApi, getErrorMessage, tasksApi } from "@/lib/api";
-import { queryStaleTime, RUNNING_POLL_INTERVAL_MS } from "@/lib/query-options";
+import { queryStaleTime } from "@/lib/query-options";
 import { queryKeys } from "@/lib/query-keys";
 import type { Task, TaskPayload } from "@/types";
 import { TaskDialog } from "./task-dialog";
@@ -69,10 +69,6 @@ export function TasksPage(): JSX.Element {
     queryKey: queryKeys.executions.running,
     queryFn: ({ signal }) => executionsApi.list({ status: "running", page_size: 100 }, signal),
     staleTime: queryStaleTime.realtime,
-    refetchInterval: (current) =>
-      (current.state.data?.items?.length ?? 0) > 0 || optimisticRunningTaskIds.size > 0
-        ? RUNNING_POLL_INTERVAL_MS
-        : false,
   });
 
   const serverRunningTaskIds = useMemo(() => {

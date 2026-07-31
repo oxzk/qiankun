@@ -196,6 +196,12 @@ export const executionsApi = {
   get(executionId: number, signal?: AbortSignal): Promise<Execution> {
     return unwrap<Execution>(http.get(`${API_PREFIX}/executions/${executionId}`, withSignal(signal)));
   },
+  /**
+   * 删除执行记录。
+   */
+  delete(executionId: number, signal?: AbortSignal): Promise<null> {
+    return unwrap<null>(http.delete(`${API_PREFIX}/executions/${executionId}`, withSignal(signal)));
+  },
 };
 
 /**

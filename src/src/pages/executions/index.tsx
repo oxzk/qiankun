@@ -1,7 +1,14 @@
 import { useMemo, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, Search } from "lucide-react";
-import { CodeBlock, EmptyState, FilterBar, SectionHeader, TooltipIconButton } from "@/components/common";
+import { Eye, Search, Trash2 } from "lucide-react";
+import {
+  CodeBlock,
+  ConfirmDialog,
+  EmptyState,
+  FilterBar,
+  SectionHeader,
+  TooltipIconButton,
+} from "@/components/common";
 import { DataTableShell } from "@/components/data/data-table-shell";
 import { PaginationBar } from "@/components/data/pagination-bar";
 import { TableEmptyState } from "@/components/data/table-empty-state";
@@ -13,12 +20,13 @@ import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { usePagination } from "@/hooks/use-pagination";
+import { useToastMutation } from "@/hooks/use-toast-mutation";
 import { useUrlParamsWriter, useUrlStringParam } from "@/hooks/use-url-state";
 import { executionsApi, getErrorMessage } from "@/lib/api";
 import { formatDateTime, formatDurationMs } from "@/lib/datetime";
 import { enumOptions } from "@/lib/enums";
 import { formatJson } from "@/lib/json-schema";
-import { queryStaleTime, RUNNING_POLL_INTERVAL_MS } from "@/lib/query-options";
+import { queryStaleTime } from "@/lib/query-options";
 import { queryKeys } from "@/lib/query-keys";
 import { executionStatusLabel, executionStatusVariant, triggerTypeLabel } from "@/pages/executions/status";
 import type { ExecutionStatus } from "@/types";
@@ -32,7 +40,7 @@ const EXECUTION_SKELETON_COLUMNS = [
   { widthClass: "w-40" },
   { widthClass: "w-40" },
   { widthClass: "w-16" },
-  { widthClass: "w-8", align: "right" as const },
+  { widthClass: "w-16", align: "right" as const },
 ];
 
 /**
@@ -53,6 +61,7 @@ export function ExecutionsPage(): JSX.Element {
   const [status, setStatus] = useUrlStringParam("status");
   const writeUrlParams = useUrlParamsWriter();
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const debouncedTaskId = useDebouncedValue(taskId, 300);
   const debouncedTaskName = useDebouncedValue(taskName, 300);
   const statusFilter = (status as ExecutionStatus | "") || "";
@@ -81,11 +90,6 @@ export function ExecutionsPage(): JSX.Element {
     enabled: !debouncedTaskId || parsedTaskId !== "",
     staleTime: queryStaleTime.list,
     placeholderData: keepPreviousData,
-    refetchInterval: (current) => {
-      if (statusFilter === "running") return RUNNING_POLL_INTERVAL_MS;
-      const hasRunning = (current.state.data?.items ?? []).some((item) => item.status === "running");
-      return hasRunning ? RUNNING_POLL_INTERVAL_MS : false;
-    },
   });
 
   const detailQuery = useQuery({
@@ -93,8 +97,17 @@ export function ExecutionsPage(): JSX.Element {
     queryFn: ({ signal }) => executionsApi.get(selectedId as number, signal),
     enabled: selectedId !== null,
     staleTime: queryStaleTime.realtime,
-    refetchInterval: (current) =>
-      current.state.data?.status === "running" ? RUNNING_POLL_INTERVAL_MS : false,
+  });
+
+  const deleteMutation = useToastMutation<null, number>({
+    mutationFn: (executionId) => executionsApi.delete(executionId),
+    successTitle: "执行记录已删除",
+    errorTitle: "删除执行记录失败",
+    invalidate: [queryKeys.executions.root],
+    onSuccess: (_data, executionId) => {
+      if (selectedId === executionId) setSelectedId(null);
+      setDeletingId(null);
+    },
   });
 
   const statusOptions = useMemo(
@@ -154,7 +167,7 @@ export function ExecutionsPage(): JSX.Element {
               <th>开始时间</th>
               <th>结束时间</th>
               <th>耗时</th>
-              <th className="text-right">详情</th>
+              <th className="text-right">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -176,9 +189,17 @@ export function ExecutionsPage(): JSX.Element {
                 <td>{formatDateTime(item.finished_at)}</td>
                 <td>{formatDurationMs(item.duration_ms)}</td>
                 <td className="text-right">
-                  <div className="flex justify-end">
+                  <div className="flex justify-end gap-1">
                     <TooltipIconButton label="查看详情" variant="ghost" onClick={() => setSelectedId(item.id)}>
                       <Eye className="h-4 w-4" />
+                    </TooltipIconButton>
+                    <TooltipIconButton
+                      label="删除"
+                      variant="ghost"
+                      onClick={() => setDeletingId(item.id)}
+                      disabled={deleteMutation.isPending}
+                    >
+                      <Trash2 className="h-4 w-4" />
                     </TooltipIconButton>
                   </div>
                 </td>
@@ -265,13 +286,6 @@ export function ExecutionsPage(): JSX.Element {
                 </div>
               ) : null}
 
-              {selected?.result_message ? (
-                <div>
-                  <div className="field-label mb-2">结果消息</div>
-                  <CodeBlock content={selected.result_message} />
-                </div>
-              ) : null}
-
               {selected?.error_message ? (
                 <div>
                   <div className="mb-2 field-label text-destructive">错误消息</div>
@@ -295,6 +309,18 @@ export function ExecutionsPage(): JSX.Element {
           )}
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={deletingId !== null}
+        onOpenChange={(open) => !open && setDeletingId(null)}
+        title="删除执行记录"
+        description={deletingId !== null ? `确认删除执行记录 #${deletingId}?` : ""}
+        confirmText="删除"
+        loading={deleteMutation.isPending}
+        onConfirm={() => {
+          if (deletingId !== null) deleteMutation.mutate(deletingId);
+        }}
+      />
     </div>
   );
 }

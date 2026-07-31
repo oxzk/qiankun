@@ -51,6 +51,17 @@ class ExecutionQueryService:
             task_names = await uow.tasks.get_names_by_ids([execution.task_id])
         return self._to_out(execution, task_names.get(execution.task_id))
 
+    async def delete_execution(self, execution_id: int) -> None:
+        """删除执行记录。"""
+        async with self._uow_factory() as uow:
+            execution = await get_required(
+                uow.executions.get_by_id,
+                execution_id,
+                "执行记录不存在",
+            )
+            await uow.executions.delete(execution)
+            await uow.commit()
+
     @staticmethod
     def _to_out(execution: TaskExecution, task_name: str | None) -> ExecutionOut:
         """将执行记录模型转换为响应结构。"""

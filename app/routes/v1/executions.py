@@ -38,3 +38,13 @@ async def get_execution(
 ) -> APIResponse[ExecutionOut]:
     """查询执行记录详情。"""
     return await service.get_execution(execution_id)
+
+
+@router.delete("/{execution_id}", response_model=APIResponse[bool])
+async def delete_execution(
+    execution_id: int,
+    service: ExecutionQueryService = Depends(get_execution_query_service),
+) -> APIResponse[bool]:
+    """删除执行记录。"""
+    await service.delete_execution(execution_id)
+    return True
