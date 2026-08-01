@@ -80,12 +80,16 @@ export function ProviderFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
+      {/* 外层禁滚, 仅代码编辑区内部滚动, 避免弹窗出现双滚动条. */}
+      <DialogContent className="flex max-h-[88vh] max-w-3xl flex-col overflow-hidden">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{provider ? "编辑执行器" : "新建执行器"}</DialogTitle>
         </DialogHeader>
-        <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
-          <div className="grid gap-4">
+        <form
+          onSubmit={form.handleSubmit(handleSubmit)}
+          className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden"
+        >
+          <div className="grid shrink-0 gap-4">
             <Field
               label="执行器名称"
               required
@@ -114,29 +118,32 @@ export function ProviderFormDialog({
             </div>
           </div>
 
-          <Field
-            label="Provider 代码"
-            required
-            error={Boolean(form.formState.errors.code)}
-            errorMessage={form.formState.errors.code?.message}
-          >
-            <Controller
-              control={form.control}
-              name="code"
-              render={({ field }) => (
-                <CodeEditor
-                  value={field.value}
-                  onChange={field.onChange}
-                  placeholder={`例如:\nclass TemplateProvider(BaseProvider):\n    name = "template"\n    config_schema = ProviderConfig\n\n    async def execute(self, config):\n        return ProviderResult.ok("执行成功")`}
-                  rows={16}
-                  required
-                  aria-label="Provider 代码"
-                />
-              )}
-            />
-          </Field>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <Field
+              label="Provider 代码"
+              required
+              error={Boolean(form.formState.errors.code)}
+              errorMessage={form.formState.errors.code?.message}
+            >
+              <Controller
+                control={form.control}
+                name="code"
+                render={({ field }) => (
+                  <CodeEditor
+                    value={field.value}
+                    onChange={field.onChange}
+                    placeholder={`例如:\nclass TemplateProvider(BaseProvider):\n    name = "template"\n    config_schema = ProviderConfig\n\n    async def execute(self, config):\n        return ProviderResult.ok("执行成功")`}
+                    rows={16}
+                    required
+                    className="max-h-[min(32rem,calc(88vh-14rem))]"
+                    aria-label="Provider 代码"
+                  />
+                )}
+              />
+            </Field>
+          </div>
 
-          <div className="mt-4 flex items-center justify-end gap-2">
+          <div className="flex shrink-0 items-center justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               取消
             </Button>

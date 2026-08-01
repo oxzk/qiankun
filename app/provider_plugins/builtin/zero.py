@@ -202,18 +202,10 @@ class ZeroProvider(BaseBrowserProvider):
             await self.wait_for_selector_click(
                 browser,
                 self.AGREE_CONTINUE_SELECTOR,
-                timeout_ms=3_000,
+                timeout_ms=10_000,
             )
         except Exception:
             pass
-
-        agreement = await self.wait_for_selector(
-            browser,
-            self.AGREEMENT_SELECTOR,
-            timeout_ms=self.SELECTOR_TIMEOUT_MS,
-        )
-        if agreement is not None and not await agreement.is_checked():
-            await agreement.click(timeout=self.SELECTOR_TIMEOUT_MS)
 
         await self.wait_for_selector_fill(
             browser,
@@ -323,7 +315,10 @@ class ZeroProvider(BaseBrowserProvider):
         *,
         before_points: str | None,
     ) -> tuple[str | None, str]:
-        """轮询签到页快照确认签到结果。"""
+        """轮询签到页快照确认签到结果。
+
+        优先依据余额变化; 若余额未变但签到按钮已禁用, 同样视为签到成功.
+        """
         deadline = time.monotonic() + self.CHECK_IN_RESULT_TIMEOUT_MS / 1000
         while time.monotonic() < deadline:
             snapshot = await self._read_checkin_snapshot(browser)
@@ -331,12 +326,25 @@ class ZeroProvider(BaseBrowserProvider):
             if before_points is not None and current is not None and current != before_points:
                 self.log(f"签到完成 (余额变化 {before_points} -> {current})")
                 return current, self.CHECK_IN_SUCCESS
+            # 点击后按钮禁用, 说明站点已完成签到态切换 (余额可能尚未刷新).
+            if snapshot.has_spin_button and snapshot.spin_disabled:
+                self.log(
+                    f"签到完成 (按钮已禁用, 余额 {before_points or '-'} -> {current or '-'})"
+                )
+                return current or before_points, self.CHECK_IN_SUCCESS
             await browser.wait_for_timeout(self.ELEMENT_POLL_MS)
 
         snapshot = await self._read_checkin_snapshot(browser)
         if before_points is not None and snapshot.balance is not None and snapshot.balance != before_points:
             self.log(f"签到完成 (余额变化 {before_points} -> {snapshot.balance})")
             return snapshot.balance, self.CHECK_IN_SUCCESS
+        # 超时后余额仍未变化: 再检测按钮是否禁用, 禁用则升为签到成功.
+        if snapshot.has_spin_button and snapshot.spin_disabled:
+            self.log(
+                f"签到完成 (结果未确认但按钮已禁用, 余额 "
+                f"{before_points or '-'} -> {snapshot.balance or '-'})"
+            )
+            return snapshot.balance or before_points, self.CHECK_IN_SUCCESS
         self.log(
             f"签到未确认: 余额未变化 "
             f"({before_points or '-'} -> {snapshot.balance or '-'})"

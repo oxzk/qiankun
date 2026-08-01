@@ -58,7 +58,8 @@ export function CodeEditor({
   return (
     <div
       className={cn(
-        "flex overflow-hidden rounded-md border border-input bg-transparent shadow-sm focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/30",
+        // 容器自身滚动: 行号与文本同步, 避免外层弹窗再出滚动条.
+        "flex overflow-auto rounded-md border border-input bg-transparent shadow-sm focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/30",
         disabled && "cursor-not-allowed opacity-70",
         className,
       )}
@@ -73,12 +74,12 @@ export function CodeEditor({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        rows={rows}
+        rows={lineCount}
         disabled={disabled}
         required={required}
         spellCheck={false}
         aria-label={ariaLabel}
-        className="min-h-24 w-full resize-y bg-transparent px-3 py-2 font-mono text-xs leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+        className="min-h-24 w-full resize-none overflow-hidden bg-transparent px-3 py-2 font-mono text-xs leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
       />
     </div>
   );

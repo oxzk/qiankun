@@ -18,8 +18,8 @@
     "types": ["vite/client", "vitest/globals"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["*"]
     }
   },
-  "include": ["src"]
+  "include": ["*.ts", "*.tsx", "auth", "components", "hooks", "lib", "pages", "routes"]
 }

@@ -25,7 +25,6 @@ import { useUrlParamsWriter, useUrlStringParam } from "@/hooks/use-url-state";
 import { executionsApi, getErrorMessage } from "@/lib/api";
 import { formatDateTime, formatDurationMs } from "@/lib/datetime";
 import { enumOptions } from "@/lib/enums";
-import { formatJson } from "@/lib/json-schema";
 import { queryStaleTime } from "@/lib/query-options";
 import { queryKeys } from "@/lib/query-keys";
 import { executionStatusLabel, executionStatusVariant, triggerTypeLabel } from "@/pages/executions/status";
@@ -276,21 +275,19 @@ export function ExecutionsPage(): JSX.Element {
 
               <div>
                 <div className="field-label mb-2">日志</div>
-                <CodeBlock content={(selected?.logs ?? []).join("\n")} emptyText="暂无日志" />
+                <CodeBlock
+                  content={(selected?.logs ?? []).join("\n")}
+                  emptyText="暂无日志"
+                  copyable={false}
+                />
               </div>
-
-              {selected?.result_data && Object.keys(selected.result_data).length > 0 ? (
-                <div>
-                  <div className="field-label mb-2">结果数据</div>
-                  <CodeBlock content={formatJson(selected.result_data)} />
-                </div>
-              ) : null}
 
               {selected?.error_message ? (
                 <div>
                   <div className="mb-2 field-label text-destructive">错误消息</div>
                   <CodeBlock
                     content={selected.error_message}
+                    copyable={false}
                     className="border-destructive/20 bg-destructive/5 text-destructive"
                   />
                 </div>
@@ -301,6 +298,7 @@ export function ExecutionsPage(): JSX.Element {
                   <div className="mb-2 field-label text-destructive">错误堆栈</div>
                   <CodeBlock
                     content={selected.error_traceback}
+                    copyable={false}
                     className="max-h-60 border-destructive/20 bg-destructive/5 font-mono text-xs text-destructive"
                   />
                 </div>
