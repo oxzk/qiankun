@@ -3,8 +3,8 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { Activity, CheckCircle2, Clock3, PlayCircle, TimerOff } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { EmptyState, SectionHeader } from "@/components/common";
-import { DataTableShell } from "@/components/data/data-table-shell";
-import { TableEmptyState } from "@/components/data/table-empty-state";
+import { DataTableShell } from "@/components/data-table-shell";
+import { TableEmptyState } from "@/components/table-empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

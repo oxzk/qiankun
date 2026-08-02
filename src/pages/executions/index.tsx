@@ -9,10 +9,10 @@ import {
   SectionHeader,
   TooltipIconButton,
 } from "@/components/common";
-import { DataTableShell } from "@/components/data/data-table-shell";
-import { PaginationBar } from "@/components/data/pagination-bar";
-import { TableEmptyState } from "@/components/data/table-empty-state";
-import { TableSkeleton } from "@/components/data/table-skeleton";
+import { DataTableShell } from "@/components/data-table-shell";
+import { PaginationBar } from "@/components/pagination-bar";
+import { TableEmptyState } from "@/components/table-empty-state";
+import { TableSkeleton } from "@/components/table-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -212,7 +212,7 @@ export function ExecutionsPage(): JSX.Element {
         page={query.data?.page ?? page}
         pageSize={query.data?.page_size}
         total={query.data?.total}
-        onPageChange={setPage}
+        onChange={setPage}
       />
 
       <Dialog open={selectedId !== null} onOpenChange={(open) => !open && setSelectedId(null)}>

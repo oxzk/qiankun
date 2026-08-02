@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     database_max_overflow: int = Field(default=10, ge=0, description="数据库连接池最大溢出数")
     jwt_secret_key: str = Field(default=DEFAULT_JWT_SECRET, description="JWT 签名密钥")
     jwt_expire_hours: int = Field(default=24, ge=1, description="JWT 有效小时数")
-    cors_origins: list[str] = Field(default_factory=list, description="CORS 来源")
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8000", "http://127.0.0.1:8000"], description="CORS 来源")
     http_retry_attempts: int = Field(default=3, ge=1, description="HTTP 请求最大尝试次数")
     http_retry_delay_seconds: float = Field(default=0.5, ge=0, description="HTTP 请求重试初始延迟秒数")
     http_retry_backoff: float = Field(default=2.0, ge=1, description="HTTP 请求重试退避倍数")

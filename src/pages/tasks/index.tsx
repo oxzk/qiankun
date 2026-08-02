@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { Plus, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { ConfirmDialog, EmptyState, FilterBar, SectionHeader } from "@/components/common";
-import { PaginationBar } from "@/components/data/pagination-bar";
+import { PaginationBar } from "@/components/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -254,7 +254,7 @@ export function TasksPage(): JSX.Element {
         onDelete={handleDelete}
       />
 
-      <PaginationBar page={query.data?.page ?? page} pageSize={query.data?.page_size} total={query.data?.total} onPageChange={setPage} />
+      <PaginationBar page={query.data?.page ?? page} pageSize={query.data?.page_size} total={query.data?.total} onChange={setPage} />
 
       <TaskDialog
         open={open}

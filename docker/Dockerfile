@@ -5,6 +5,7 @@ WORKDIR /build
 COPY src/package.json src/package-lock.json ./
 RUN npm ci
 
+COPY public /public
 COPY src ./
 RUN npm run build
 RUN test -f /build/dist/index.html

@@ -55,7 +55,7 @@ const SessionContext = createContext<SessionContextValue | null>(null);
  */
 export function SessionProvider({ children }: SessionProviderProps): JSX.Element {
   const localSession = readValidLocalSession();
-  const [ready, setReady] = useState(() => !localSession);
+  const [ready, setReady] = useState(true);
   const [loggedIn, setLoggedIn] = useState(() => Boolean(localSession));
   const [user, setUser] = useState<User | null>(() => localSession?.user ?? null);
   const { toast } = useToast();
@@ -66,7 +66,6 @@ export function SessionProvider({ children }: SessionProviderProps): JSX.Element
   const expiryTimerRef = useRef<number | null>(null);
   const warnTimerRef = useRef<number | null>(null);
   const locationRef = useRef(location);
-  const bootstrappedRef = useRef(false);
 
   locationRef.current = location;
 
@@ -140,8 +139,6 @@ export function SessionProvider({ children }: SessionProviderProps): JSX.Element
   }, [clearExpiryTimers, clearSession, redirectToLogin, toast]);
 
   useEffect(() => {
-    if (bootstrappedRef.current) return;
-    bootstrappedRef.current = true;
     let cancelled = false;
 
     async function bootstrap(): Promise<void> {
@@ -175,9 +172,7 @@ export function SessionProvider({ children }: SessionProviderProps): JSX.Element
     return () => {
       cancelled = true;
     };
-    // 仅启动时校验一次会话
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [clearSession, scheduleExpiryTimers]);
 
   useEffect(() => {
     const onUnauthorized = () => {

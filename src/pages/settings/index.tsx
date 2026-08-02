@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, DatabaseBackup, RotateCcw, User } from "lucide-react";
 import { ConfirmDialog, EmptyState, SectionHeader } from "@/components/common";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToastMutation } from "@/hooks/use-toast-mutation";
 import { useUrlStringParam } from "@/hooks/use-url-state";
-import { backupsApi, notificationsApi } from "@/lib/api";
+import { authApi, backupsApi, notificationsApi } from "@/lib/api";
 import { formatByteSize, formatDateTime } from "@/lib/datetime";
 import { queryStaleTime } from "@/lib/query-options";
 import { queryKeys } from "@/lib/query-keys";
@@ -48,6 +48,14 @@ export function SettingsPage(): JSX.Element {
   const [editingChannel, setEditingChannel] = useState<NotifyType | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<BackupInfo | null>(null);
   const [restoreConfirmText, setRestoreConfirmText] = useState("");
+  const queryClient = useQueryClient();
+
+  const userQuery = useQuery({
+    queryKey: queryKeys.auth.me,
+    queryFn: ({ signal }) => authApi.me(signal),
+    enabled: activeTab === "user",
+    staleTime: queryStaleTime.list,
+  });
 
   const notificationsQuery = useQuery({
     queryKey: queryKeys.notifications.root,
@@ -130,6 +138,7 @@ export function SettingsPage(): JSX.Element {
   }
 
   const headerLoading =
+    (activeTab === "user" && userQuery.isFetching) ||
     (activeTab === "notify" && notificationsQuery.isFetching) ||
     (activeTab === "backup" && backupsQuery.isFetching);
 
@@ -137,7 +146,16 @@ export function SettingsPage(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      <SectionHeader title="系统设置" description="配置系统报警、数据备份及管理员账户。" loading={headerLoading} />
+      <SectionHeader
+        title="系统设置"
+        description="配置系统报警、数据备份及管理员账户。"
+        loading={headerLoading}
+        onRefresh={() => {
+          if (activeTab === "user") void queryClient.invalidateQueries({ queryKey: queryKeys.auth.me });
+          if (activeTab === "notify") void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.root });
+          if (activeTab === "backup") void queryClient.invalidateQueries({ queryKey: queryKeys.backups.root });
+        }}
+      />
 
       <Tabs value={activeTab} onValueChange={setTabParam} className="space-y-4">
         <TabsList>

@@ -1,4 +1,5 @@
 import { LogOut, Moon, Sun } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "@/auth/session-provider";
 import { Button } from "@/components/ui/button";
@@ -22,8 +23,16 @@ export interface HeaderProps {
 export function Header({ dark, onToggleTheme }: HeaderProps): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { logout, user } = useSession();
   const activeRoute = resolveMenuRoute(location.pathname);
+
+  const handleMenuClick = (path: string) => {
+    if (location.pathname === path || (path !== "/" && location.pathname.startsWith(`${path}`))) {
+      void queryClient.invalidateQueries();
+    }
+    navigate(path);
+  };
 
   return (
     <header className="glass sticky top-0 z-40 w-full">
@@ -46,7 +55,7 @@ export function Header({ dark, onToggleTheme }: HeaderProps): JSX.Element {
                 variant={activeRoute?.path === route.path ? "default" : "ghost"}
                 className="h-8 rounded-full"
                 aria-current={activeRoute?.path === route.path ? "page" : undefined}
-                onClick={() => navigate(route.path)}
+                onClick={() => handleMenuClick(route.path)}
               >
                 <Icon className="h-4 w-4" />
                 {route.label}
@@ -84,7 +93,7 @@ export function Header({ dark, onToggleTheme }: HeaderProps): JSX.Element {
               className="h-8 rounded-full px-3"
               aria-current={activeRoute?.path === route.path ? "page" : undefined}
               aria-label={route.label}
-              onClick={() => navigate(route.path)}
+              onClick={() => handleMenuClick(route.path)}
             >
               <Icon className="h-4 w-4" />
               <span className="hidden sm:inline">{route.label}</span>

@@ -5,7 +5,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-data
+data/
 
 # Environments
 .env
@@ -20,8 +20,8 @@ dist/
 src/node_modules/
 src/dist/
 *.tsbuildinfo
-public/*
-!public/.gitkeep
+public/index.html
+public/assets/
 *.egg-info
 
 # Editor & System files

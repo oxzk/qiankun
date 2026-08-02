@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw } from "lucide-react";
 import { EmptyState, SectionHeader } from "@/components/common";
-import { PaginationBar } from "@/components/data/pagination-bar";
+import { PaginationBar } from "@/components/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { usePagination } from "@/hooks/use-pagination";
 import { useToastMutation } from "@/hooks/use-toast-mutation";
@@ -162,7 +162,7 @@ export function ProvidersPage(): JSX.Element {
         page={query.data?.page ?? page}
         pageSize={query.data?.page_size}
         total={query.data?.total}
-        onPageChange={setPage}
+        onChange={setPage}
       />
 
       <ProviderFormDialog

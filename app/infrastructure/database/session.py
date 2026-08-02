@@ -80,7 +80,7 @@ class Database:
             pool_timeout=30,
             pool_recycle=1800,
             # 生产断连后应主动探活, 与 debug 无关。
-            pool_pre_ping=True,
+            # pool_pre_ping=True,
             echo=settings.app_debug,
         )
         event.listen(self._engine.sync_engine, "connect", self._set_utc_timezone)

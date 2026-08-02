@@ -5,19 +5,19 @@ export const queryStaleTime = {
   /**
    * 运行态数据。
    */
-  realtime: 3_000,
+  realtime: 0,
   /**
    * 常规列表。
    */
-  list: 10_000,
+  list: 0,
   /**
    * 统计摘要。
    */
-  stats: 15_000,
+  stats: 0,
   /**
    * 目录类低频数据。
    */
-  catalog: 60_000,
+  catalog: 0,
 } as const;
 
 /**
