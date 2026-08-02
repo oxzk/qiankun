@@ -5,7 +5,14 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Field } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { CheckboxGroup, type CheckboxOption } from "@/components/ui/checkbox-group";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -168,143 +175,148 @@ export function TaskDialog({ open, task, loading, enums, onOpenChange, onSubmit 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{task ? "编辑任务" : "新建任务"}</DialogTitle>
         </DialogHeader>
-        <form className="grid gap-7" onSubmit={form.handleSubmit(submit)}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label="任务名称" required error={Boolean(form.formState.errors.name)} errorMessage={form.formState.errors.name?.message}>
-              <Input {...form.register("name")} required />
-            </Field>
-            <Field
-              label="Cron 表达式"
-              required
-              error={Boolean(form.formState.errors.cron_expression)}
-              errorMessage={form.formState.errors.cron_expression?.message}
-            >
-              <Input {...form.register("cron_expression")} required />
-            </Field>
-          </div>
-
-          <div className="rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-            <div className="mb-1 font-medium text-foreground">下次运行预览</div>
-            {nextCronRuns.length ? (
-              <ul className="space-y-0.5 font-mono">
-                {nextCronRuns.map((runAt) => (
-                  <li key={runAt.toISOString()}>{formatDateTime(runAt)}</li>
-                ))}
-              </ul>
-            ) : (
-              <div>无法解析当前 Cron 表达式, 请使用标准 5 段格式。</div>
-            )}
-          </div>
-
-          <Field
-            label="选择执行器"
-            required
-            error={Boolean(form.formState.errors.provider_name)}
-            errorMessage={form.formState.errors.provider_name?.message}
-          >
-            {providersQuery.isLoading ? (
-              <Skeleton className="h-10 w-full" />
-            ) : (
-              <Select
-                value={providerName}
-                onValueChange={handleProviderChange}
-                options={providerOptions}
-                placeholder="请选择"
-              />
-            )}
-          </Field>
-
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
-            <Field label="超时秒数" required error={Boolean(form.formState.errors.timeout_seconds)}>
-              <Input type="number" min={1} max={86400} {...form.register("timeout_seconds", { valueAsNumber: true })} required />
-            </Field>
-            <Field label="重试次数" required error={Boolean(form.formState.errors.retry_count)}>
-              <Input type="number" min={0} max={10} {...form.register("retry_count", { valueAsNumber: true })} required />
-            </Field>
-            <Field label="重试间隔 (秒)" required error={Boolean(form.formState.errors.retry_interval)}>
-              <Input type="number" min={1} max={86400} {...form.register("retry_interval", { valueAsNumber: true })} required />
-            </Field>
-            <div className="grid justify-self-end gap-1.5">
-              <span className="field-label whitespace-nowrap">状态</span>
-              <div className="flex h-9 items-center justify-end">
-                <Controller
-                  control={form.control}
-                  name="enabled"
-                  render={({ field }) => (
-                    <Switch checked={field.value} onCheckedChange={field.onChange} />
-                  )}
-                />
-              </div>
-            </div>
-          </div>
-
-          <Field label="执行器配置 (JSON)" error={Boolean(configError)} errorMessage={configError}>
-            <Textarea
-              {...form.register("provider_config_text")}
-              placeholder={`例如:\n{\n  "message": "hello"\n}`}
-              rows={7}
-              className="font-mono text-xs"
-              disabled={configMutation.isPending}
-            />
-          </Field>
-
-          <fieldset className="grid gap-3 rounded-lg border p-3">
-            <legend className="-ml-1 px-1 text-sm font-semibold text-muted-foreground">通知关联</legend>
+        <form
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+          onSubmit={form.handleSubmit(submit)}
+        >
+          <DialogBody className="space-y-6">
             <div className="grid gap-4 md:grid-cols-2">
-              <Field label="通知策略" required>
-                <Controller
-                  control={form.control}
-                  name="notify_strategy"
-                  render={({ field }) => (
-                    <Select
-                      value={field.value}
-                      onValueChange={(value) => {
-                        const strategy = value as NotifyStrategy;
-                        field.onChange(strategy);
-                        if (strategy === "never") {
-                          form.setValue("notification_ids", []);
-                        }
-                      }}
-                      options={notifyStrategyOptions}
-                    />
-                  )}
-                />
+              <Field label="任务名称" required error={Boolean(form.formState.errors.name)} errorMessage={form.formState.errors.name?.message}>
+                <Input {...form.register("name")} required />
               </Field>
-              <Field label="通知渠道">
-                {notificationsQuery.isLoading ? (
-                  <Skeleton className="h-10 w-full" />
-                ) : notifyStrategy === "never" ? (
-                  <div className="flex h-10 items-center text-xs text-muted-foreground italic">不发送任何通知</div>
-                ) : (
+              <Field
+                label="Cron 表达式"
+                required
+                error={Boolean(form.formState.errors.cron_expression)}
+                errorMessage={form.formState.errors.cron_expression?.message}
+              >
+                <Input {...form.register("cron_expression")} required />
+              </Field>
+            </div>
+
+            <div className="rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <div className="mb-1 font-medium text-foreground">下次运行预览</div>
+              {nextCronRuns.length ? (
+                <ul className="space-y-0.5 font-mono">
+                  {nextCronRuns.map((runAt) => (
+                    <li key={runAt.toISOString()}>{formatDateTime(runAt)}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div>无法解析当前 Cron 表达式, 请使用标准 5 段格式。</div>
+              )}
+            </div>
+
+            <Field
+              label="选择执行器"
+              required
+              error={Boolean(form.formState.errors.provider_name)}
+              errorMessage={form.formState.errors.provider_name?.message}
+            >
+              {providersQuery.isLoading ? (
+                <Skeleton className="h-10 w-full" />
+              ) : (
+                <Select
+                  value={providerName}
+                  onValueChange={handleProviderChange}
+                  options={providerOptions}
+                  placeholder="请选择"
+                />
+              )}
+            </Field>
+
+            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+              <Field label="超时秒数" required error={Boolean(form.formState.errors.timeout_seconds)}>
+                <Input type="number" min={1} max={86400} {...form.register("timeout_seconds", { valueAsNumber: true })} required />
+              </Field>
+              <Field label="重试次数" required error={Boolean(form.formState.errors.retry_count)}>
+                <Input type="number" min={0} max={10} {...form.register("retry_count", { valueAsNumber: true })} required />
+              </Field>
+              <Field label="重试间隔 (秒)" required error={Boolean(form.formState.errors.retry_interval)}>
+                <Input type="number" min={1} max={86400} {...form.register("retry_interval", { valueAsNumber: true })} required />
+              </Field>
+              <div className="grid justify-self-end gap-1.5">
+                <span className="field-label whitespace-nowrap">状态</span>
+                <div className="flex h-9 items-center justify-end">
                   <Controller
                     control={form.control}
-                    name="notification_ids"
+                    name="enabled"
                     render={({ field }) => (
-                      <CheckboxGroup
-                        options={notificationOptions}
+                      <Switch checked={field.value} onCheckedChange={field.onChange} />
+                    )}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <Field label="执行器配置 (JSON)" error={Boolean(configError)} errorMessage={configError}>
+              <Textarea
+                {...form.register("provider_config_text")}
+                placeholder={`例如:\n{\n  "message": "hello"\n}`}
+                rows={7}
+                className="font-mono text-xs"
+                disabled={configMutation.isPending}
+              />
+            </Field>
+
+            <fieldset className="grid gap-3 rounded-lg border p-3">
+              <legend className="-ml-1 px-1 text-sm font-semibold text-muted-foreground">通知关联</legend>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="通知策略" required>
+                  <Controller
+                    control={form.control}
+                    name="notify_strategy"
+                    render={({ field }) => (
+                      <Select
                         value={field.value}
-                        onChange={(value) => field.onChange(value as number[])}
-                        className="min-h-10"
-                        orientation="horizontal"
+                        onValueChange={(value) => {
+                          const strategy = value as NotifyStrategy;
+                          field.onChange(strategy);
+                          if (strategy === "never") {
+                            form.setValue("notification_ids", []);
+                          }
+                        }}
+                        options={notifyStrategyOptions}
                       />
                     )}
                   />
-                )}
-              </Field>
-            </div>
-          </fieldset>
-          <div className="mt-4 flex justify-end gap-2">
+                </Field>
+                <Field label="通知渠道">
+                  {notificationsQuery.isLoading ? (
+                    <Skeleton className="h-10 w-full" />
+                  ) : notifyStrategy === "never" ? (
+                    <div className="flex h-10 items-center text-xs text-muted-foreground italic">不发送任何通知</div>
+                  ) : (
+                    <Controller
+                      control={form.control}
+                      name="notification_ids"
+                      render={({ field }) => (
+                        <CheckboxGroup
+                          options={notificationOptions}
+                          value={field.value}
+                          onChange={(value) => field.onChange(value as number[])}
+                          className="min-h-10"
+                          orientation="horizontal"
+                        />
+                      )}
+                    />
+                  )}
+                </Field>
+              </div>
+            </fieldset>
+          </DialogBody>
+          <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               取消
             </Button>
             <Button type="submit" loading={loading} disabled={Boolean(configError)}>
               保存
             </Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

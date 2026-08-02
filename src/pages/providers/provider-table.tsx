@@ -1,8 +1,6 @@
 import { memo } from "react";
 import { Pencil, Play } from "lucide-react";
-import { EmptyState, TooltipIconButton } from "@/components/common";
-import { DataTableShell } from "@/components/data-table-shell";
-import { TableSkeleton } from "@/components/table-skeleton";
+import { DataTableShell, EmptyState, TableSkeleton, TooltipIconButton } from "@/components/common";
 import { Switch } from "@/components/ui/switch";
 import type { ProviderInfo } from "@/types";
 

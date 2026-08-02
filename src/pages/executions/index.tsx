@@ -4,24 +4,22 @@ import { Eye, Search, Trash2 } from "lucide-react";
 import {
   CodeBlock,
   ConfirmDialog,
+  DataTableShell,
   EmptyState,
   FilterBar,
+  PaginationBar,
   SectionHeader,
+  TableEmptyState,
+  TableSkeleton,
   TooltipIconButton,
 } from "@/components/common";
-import { DataTableShell } from "@/components/data-table-shell";
-import { PaginationBar } from "@/components/pagination-bar";
-import { TableEmptyState } from "@/components/table-empty-state";
-import { TableSkeleton } from "@/components/table-skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { usePagination } from "@/hooks/use-pagination";
+import { useTableParams } from "@/hooks/use-table-params";
 import { useToastMutation } from "@/hooks/use-toast-mutation";
-import { useUrlParamsWriter, useUrlStringParam } from "@/hooks/use-url-state";
 import { executionsApi, getErrorMessage } from "@/lib/api";
 import { formatDateTime, formatDurationMs } from "@/lib/datetime";
 import { enumOptions } from "@/lib/enums";
@@ -55,25 +53,26 @@ function parseTaskIdFilter(raw: string): number | "" {
  * 执行记录页面。
  */
 export function ExecutionsPage(): JSX.Element {
-  const [taskId, setTaskId] = useUrlStringParam("task_id");
-  const [taskName, setTaskName] = useUrlStringParam("task_name");
-  const [status, setStatus] = useUrlStringParam("status");
-  const writeUrlParams = useUrlParamsWriter();
+  const { filters, debouncedFilters, setFilter, resetFilters, page, setPage } = useTableParams({
+    defaultFilters: {
+      task_id: "",
+      task_name: "",
+      status: "" as ExecutionStatus | "",
+    },
+    debounceKeys: ["task_id", "task_name"],
+  });
+
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const debouncedTaskId = useDebouncedValue(taskId, 300);
-  const debouncedTaskName = useDebouncedValue(taskName, 300);
-  const statusFilter = (status as ExecutionStatus | "") || "";
-  const parsedTaskId = parseTaskIdFilter(debouncedTaskId);
-  const { page, setPage } = usePagination([debouncedTaskId, debouncedTaskName, statusFilter]);
+  const parsedTaskId = parseTaskIdFilter(debouncedFilters.task_id);
   const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: queryKeys.executions.list({
       page,
-      taskId: debouncedTaskId,
-      taskName: debouncedTaskName,
-      status: statusFilter,
+      taskId: debouncedFilters.task_id,
+      taskName: debouncedFilters.task_name,
+      status: debouncedFilters.status,
     }),
     queryFn: ({ signal }) =>
       executionsApi.list(
@@ -81,12 +80,12 @@ export function ExecutionsPage(): JSX.Element {
           page,
           page_size: 20,
           task_id: parsedTaskId,
-          task_name: debouncedTaskName,
-          status: statusFilter,
+          task_name: debouncedFilters.task_name || undefined,
+          status: debouncedFilters.status || undefined,
         },
         signal,
       ),
-    enabled: !debouncedTaskId || parsedTaskId !== "",
+    enabled: !debouncedFilters.task_id || parsedTaskId !== "",
     staleTime: queryStaleTime.list,
     placeholderData: keepPreviousData,
   });
@@ -115,7 +114,7 @@ export function ExecutionsPage(): JSX.Element {
   );
 
   const selected = detailQuery.data;
-  const hasActiveFilters = Boolean(taskId || taskName || status);
+  const hasActiveFilters = Boolean(filters.task_id || filters.task_name || filters.status);
 
   return (
     <div className="space-y-4">
@@ -128,32 +127,31 @@ export function ExecutionsPage(): JSX.Element {
         }}
       />
       {query.error ? <EmptyState title="执行记录加载失败" description={getErrorMessage(query.error)} /> : null}
-      {debouncedTaskId && parsedTaskId === "" ? (
+      {debouncedFilters.task_id && parsedTaskId === "" ? (
         <EmptyState title="任务 ID 无效" description="请输入正整数任务 ID, 或改用任务名称筛选。" />
       ) : null}
-      <FilterBar
-        hasActiveFilters={hasActiveFilters}
-        onClear={() => writeUrlParams({ task_id: null, task_name: null, status: null, page: null })}
-      >
+
+      <FilterBar hasActiveFilters={hasActiveFilters} onClear={resetFilters}>
         <div className="relative md:w-64">
           <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
-            value={taskName}
+            value={filters.task_name}
             onChange={(event) => {
-              setTaskName(event.target.value);
-              setTaskId("");
+              setFilter("task_name", event.target.value);
+              if (filters.task_id) setFilter("task_id", "");
             }}
-            placeholder={taskId ? `任务 #${taskId}` : "按任务名称查询"}
+            placeholder={filters.task_id ? `任务 #${filters.task_id}` : "按任务名称查询"}
             className="pl-9"
           />
         </div>
         <Select
-          value={statusFilter}
-          onValueChange={(value) => setStatus(value)}
+          value={filters.status}
+          onValueChange={(value) => setFilter("status", value as ExecutionStatus | "")}
           options={statusOptions}
           className="md:w-36"
         />
       </FilterBar>
+
       <DataTableShell>
         <table className="data-table">
           <thead>
@@ -208,6 +206,7 @@ export function ExecutionsPage(): JSX.Element {
         </table>
         {!query.isLoading && !query.data?.items.length ? <TableEmptyState title="暂无执行记录" /> : null}
       </DataTableShell>
+
       <PaginationBar
         page={query.data?.page ?? page}
         pageSize={query.data?.page_size}
@@ -216,95 +215,97 @@ export function ExecutionsPage(): JSX.Element {
       />
 
       <Dialog open={selectedId !== null} onOpenChange={(open) => !open && setSelectedId(null)}>
-        <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>执行详情 #{selectedId}</DialogTitle>
           </DialogHeader>
-          {detailQuery.isLoading ? (
-            <div className="space-y-3">
-              <Skeleton className="h-4 w-48" />
-              <Skeleton className="h-4 w-64" />
-              <Skeleton className="h-32 w-full" />
-            </div>
-          ) : detailQuery.error ? (
-            <EmptyState title="详情加载失败" description={getErrorMessage(detailQuery.error)} />
-          ) : (
-            <div className="grid gap-4">
-              <div className="grid gap-3 text-sm md:grid-cols-2">
-                <div>
-                  <span className="text-muted-foreground">任务: </span>
-                  <span className="font-medium">
-                    {selected ? selected.task_name || `任务 #${selected.task_id}` : "-"}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">执行器: </span>
-                  <span className="font-mono text-xs">{selected?.provider_name}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">触发方式: </span>
-                  <span>{selected ? triggerTypeLabel(selected.trigger_type, query.data?.enums) : "-"}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">状态: </span>
-                  {selected ? (
-                    <Badge variant={executionStatusVariant(selected.status)}>
-                      {executionStatusLabel(selected.status, query.data?.enums)}
-                    </Badge>
-                  ) : (
-                    <span>-</span>
-                  )}
-                </div>
-                <div>
-                  <span className="text-muted-foreground">开始时间: </span>
-                  <span>{formatDateTime(selected?.started_at)}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">结束时间: </span>
-                  <span>{formatDateTime(selected?.finished_at)}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">执行耗时: </span>
-                  <span>{formatDurationMs(selected?.duration_ms)}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">重试次数: </span>
-                  <span>{selected?.retry_attempt ?? 0} 次</span>
-                </div>
+          <DialogBody className="space-y-4">
+            {detailQuery.isLoading ? (
+              <div className="space-y-3">
+                <Skeleton className="h-4 w-48" />
+                <Skeleton className="h-4 w-64" />
+                <Skeleton className="h-32 w-full" />
               </div>
+            ) : detailQuery.error ? (
+              <EmptyState title="详情加载失败" description={getErrorMessage(detailQuery.error)} />
+            ) : (
+              <div className="grid gap-4">
+                <div className="grid gap-3 text-sm md:grid-cols-2">
+                  <div>
+                    <span className="text-muted-foreground">任务: </span>
+                    <span className="font-medium">
+                      {selected ? selected.task_name || `任务 #${selected.task_id}` : "-"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">执行器: </span>
+                    <span className="font-mono text-xs">{selected?.provider_name}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">触发方式: </span>
+                    <span>{selected ? triggerTypeLabel(selected.trigger_type, query.data?.enums) : "-"}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">状态: </span>
+                    {selected ? (
+                      <Badge variant={executionStatusVariant(selected.status)}>
+                        {executionStatusLabel(selected.status, query.data?.enums)}
+                      </Badge>
+                    ) : (
+                      <span>-</span>
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">开始时间: </span>
+                    <span>{formatDateTime(selected?.started_at)}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">结束时间: </span>
+                    <span>{formatDateTime(selected?.finished_at)}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">执行耗时: </span>
+                    <span>{formatDurationMs(selected?.duration_ms)}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">重试次数: </span>
+                    <span>{selected?.retry_attempt ?? 0} 次</span>
+                  </div>
+                </div>
 
-              <div>
-                <div className="field-label mb-2">日志</div>
-                <CodeBlock
-                  content={(selected?.logs ?? []).join("\n")}
-                  emptyText="暂无日志"
-                  copyable={false}
-                />
-              </div>
-
-              {selected?.error_message ? (
                 <div>
-                  <div className="mb-2 field-label text-destructive">错误消息</div>
+                  <div className="field-label mb-2">日志</div>
                   <CodeBlock
-                    content={selected.error_message}
+                    content={(selected?.logs ?? []).join("\n")}
+                    emptyText="暂无日志"
                     copyable={false}
-                    className="border-destructive/20 bg-destructive/5 text-destructive"
                   />
                 </div>
-              ) : null}
 
-              {selected?.error_traceback ? (
-                <div>
-                  <div className="mb-2 field-label text-destructive">错误堆栈</div>
-                  <CodeBlock
-                    content={selected.error_traceback}
-                    copyable={false}
-                    className="max-h-60 border-destructive/20 bg-destructive/5 font-mono text-xs text-destructive"
-                  />
-                </div>
-              ) : null}
-            </div>
-          )}
+                {selected?.error_message ? (
+                  <div>
+                    <div className="mb-2 field-label text-destructive">错误消息</div>
+                    <CodeBlock
+                      content={selected.error_message}
+                      copyable={false}
+                      className="border-destructive/20 bg-destructive/5 text-destructive"
+                    />
+                  </div>
+                ) : null}
+
+                {selected?.error_traceback ? (
+                  <div>
+                    <div className="mb-2 field-label text-destructive">错误堆栈</div>
+                    <CodeBlock
+                      content={selected.error_traceback}
+                      copyable={false}
+                      className="max-h-60 border-destructive/20 bg-destructive/5 font-mono text-xs text-destructive"
+                    />
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </DialogBody>
         </DialogContent>
       </Dialog>
 

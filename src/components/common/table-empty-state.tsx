@@ -1,4 +1,4 @@
-import { EmptyState } from "@/components/common";
+import { EmptyState } from "./empty-state";
 
 export interface TableEmptyStateProps {
   /**

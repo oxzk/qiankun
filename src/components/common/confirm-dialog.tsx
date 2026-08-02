@@ -1,6 +1,13 @@
 import type { ReactNode } from "react";
 import { Button, type ButtonProps } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export interface ConfirmDialogProps {
   /**
@@ -66,9 +73,11 @@ export function ConfirmDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        <p className="text-sm text-muted-foreground">{description}</p>
-        {children ? <div className="space-y-2">{children}</div> : null}
-        <div className="flex justify-end gap-2">
+        <DialogBody className="space-y-3 py-5">
+          <p className="text-sm text-muted-foreground leading-relaxed">{description}</p>
+          {children ? <div className="space-y-2">{children}</div> : null}
+        </DialogBody>
+        <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             取消
           </Button>
@@ -81,7 +90,7 @@ export function ConfirmDialog({
           >
             {confirmText}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

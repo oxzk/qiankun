@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ToastProvider } from "@/hooks/use-toast";
 import App from "@/App";
-import { queryStaleTime } from "@/lib/query-options";
 import "@/index.css";
 
 const queryClient = new QueryClient({

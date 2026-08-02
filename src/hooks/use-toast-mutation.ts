@@ -5,8 +5,7 @@ import {
   type UseMutationResult,
 } from "@tanstack/react-query";
 import { getErrorMessage } from "@/lib/api";
-import { useToast } from "@/hooks/use-toast";
-import type { ToastMessage } from "@/components/ui/sonner";
+import { useToast, type ToastMessage } from "@/hooks/use-toast";
 
 export interface ToastMutationOptions<TData, TVariables> {
   /**

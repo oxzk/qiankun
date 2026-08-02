@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { ConfirmDialog, EmptyState, FilterBar, SectionHeader } from "@/components/common";
-import { PaginationBar } from "@/components/pagination-bar";
+import { ConfirmDialog, EmptyState, FilterBar, PaginationBar, SectionHeader } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { usePagination } from "@/hooks/use-pagination";
+import { useTableParams } from "@/hooks/use-table-params";
+import { useToast } from "@/hooks/use-toast";
 import { useToastMutation } from "@/hooks/use-toast-mutation";
-import { useUrlParamsWriter, useUrlStringParam } from "@/hooks/use-url-state";
 import { executionsApi, getErrorMessage, tasksApi } from "@/lib/api";
 import { queryStaleTime } from "@/lib/query-options";
 import { queryKeys } from "@/lib/query-keys";
@@ -18,8 +16,7 @@ import type { Task, TaskPayload } from "@/types";
 import { TaskDialog } from "./task-dialog";
 import { TaskTable } from "./task-table";
 
-type TaskAction = "run" | "cancel" | "delete" | "toggle";
-type TaskActionResult = Task | boolean | null;
+type TaskAction = "run" | "cancel" | "delete";
 
 interface ConfirmState {
   /**
@@ -36,28 +33,35 @@ interface ConfirmState {
  * 任务管理页面。
  */
 export function TasksPage(): JSX.Element {
-  const [name, setName] = useUrlStringParam("q");
-  const [enabledParam, setEnabledParam] = useUrlStringParam("enabled");
-  const writeUrlParams = useUrlParamsWriter();
-  const enabledFilter: boolean | "" = enabledParam === "true" ? true : enabledParam === "false" ? false : "";
+  const { filters, debouncedFilters, setFilter, resetFilters, page, setPage } = useTableParams({
+    defaultFilters: {
+      q: "",
+      enabled: "" as "true" | "false" | "",
+    },
+    debounceKeys: ["q"],
+  });
+
+  const enabledFilter: boolean | "" =
+    debouncedFilters.enabled === "true" ? true : debouncedFilters.enabled === "false" ? false : "";
+
   const [editing, setEditing] = useState<Task | null>(null);
   const [open, setOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   const [optimisticRunningTaskIds, setOptimisticRunningTaskIds] = useState<Set<number>>(new Set());
-  const debouncedName = useDebouncedValue(name, 300);
-  const { page, setPage } = usePagination([debouncedName, enabledFilter]);
+
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const query = useQuery({
-    queryKey: queryKeys.tasks.list({ page, name: debouncedName, enabled: enabledFilter }),
+    queryKey: queryKeys.tasks.list({ page, name: debouncedFilters.q, enabled: enabledFilter }),
     queryFn: ({ signal }) =>
       tasksApi.list(
         {
           page,
           page_size: 20,
           enabled: enabledFilter,
-          name: debouncedName.trim() || undefined,
+          name: debouncedFilters.q.trim() || undefined,
         },
         signal,
       ),
@@ -69,6 +73,7 @@ export function TasksPage(): JSX.Element {
     queryKey: queryKeys.executions.running,
     queryFn: ({ signal }) => executionsApi.list({ status: "running", page_size: 100 }, signal),
     staleTime: queryStaleTime.realtime,
+    refetchInterval: (q) => ((q.state.data?.items?.length ?? 0) > 0 ? 3000 : false),
   });
 
   const serverRunningTaskIds = useMemo(() => {
@@ -97,16 +102,52 @@ export function TasksPage(): JSX.Element {
     },
   });
 
-  const actionMutation = useToastMutation<TaskActionResult, { task: Task; action: TaskAction; enabled?: boolean }>({
-    mutationFn: ({ task, action, enabled }) => {
+  // 开关启停操作的乐观更新
+  const toggleMutation = useMutation({
+    mutationFn: ({ task, enabled }: { task: Task; enabled: boolean }) =>
+      enabled ? tasksApi.enable(task.id) : tasksApi.disable(task.id),
+    onMutate: async ({ task, enabled }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.tasks.root });
+      const previousQueries = queryClient.getQueriesData({ queryKey: queryKeys.tasks.root });
+
+      queryClient.setQueriesData({ queryKey: queryKeys.tasks.root }, (old: unknown) => {
+        if (!old || typeof old !== "object" || !("items" in old) || !Array.isArray((old as { items: Task[] }).items)) {
+          return old;
+        }
+        return {
+          ...old,
+          items: (old as { items: Task[] }).items.map((item) =>
+            item.id === task.id ? { ...item, enabled } : item,
+          ),
+        };
+      });
+
+      return { previousQueries };
+    },
+    onError: (err, _, context) => {
+      if (context?.previousQueries) {
+        context.previousQueries.forEach(([key, data]) => {
+          queryClient.setQueryData(key, data);
+        });
+      }
+      toast({ title: "操作失败", description: getErrorMessage(err), variant: "destructive" });
+    },
+    onSuccess: (_, variables) => {
+      toast({ title: variables.enabled ? "任务已启用" : "任务已停用" });
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.root });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.stats.taskStats });
+    },
+  });
+
+  const actionMutation = useToastMutation<unknown, { task: Task; action: TaskAction }>({
+    mutationFn: ({ task, action }) => {
       if (action === "run") return tasksApi.run(task.id);
       if (action === "cancel") return tasksApi.cancel(task.id);
-      if (action === "toggle") {
-        return enabled ? tasksApi.enable(task.id) : tasksApi.disable(task.id);
-      }
       return tasksApi.delete(task.id);
     },
-    successTitle: (_, variables) => taskActionSuccessTitle(variables.action, variables.enabled),
+    successTitle: (_, variables) => (variables.action === "run" ? "已触发运行" : variables.action === "cancel" ? "已发送取消请求" : "任务已删除"),
     errorTitle: "操作失败",
     invalidate: [queryKeys.tasks.root, queryKeys.executions.root, queryKeys.stats.taskStats],
     onSuccess: (result, variables) => {
@@ -131,13 +172,17 @@ export function TasksPage(): JSX.Element {
   });
 
   const pendingTaskId =
-    actionMutation.isPending && actionMutation.variables ? actionMutation.variables.task.id : null;
+    actionMutation.isPending && actionMutation.variables
+      ? actionMutation.variables.task.id
+      : toggleMutation.isPending && toggleMutation.variables
+        ? toggleMutation.variables.task.id
+        : null;
 
   const handleToggle = useCallback(
     (task: Task, enabled: boolean) => {
-      actionMutation.mutate({ task, action: "toggle", enabled });
+      toggleMutation.mutate({ task, enabled });
     },
-    [actionMutation],
+    [toggleMutation],
   );
 
   const handleExecute = useCallback(
@@ -187,22 +232,7 @@ export function TasksPage(): JSX.Element {
     actionMutation.mutate({ task: confirmState.task, action: confirmState.action });
   }
 
-  /**
-   * 更新启用筛选。
-   */
-  function setEnabledFilter(value: boolean | ""): void {
-    if (value === "") setEnabledParam("");
-    else setEnabledParam(String(value));
-  }
-
-  /**
-   * 清空全部筛选。
-   */
-  function clearFilters(): void {
-    writeUrlParams({ q: null, enabled: null, page: null });
-  }
-
-  const hasActiveFilters = Boolean(name || enabledParam);
+  const hasActiveFilters = Boolean(filters.q || filters.enabled);
 
   return (
     <div className="space-y-4">
@@ -224,14 +254,19 @@ export function TasksPage(): JSX.Element {
 
       {query.error ? <EmptyState title="任务加载失败" description={getErrorMessage(query.error)} /> : null}
 
-      <FilterBar hasActiveFilters={hasActiveFilters} onClear={clearFilters}>
+      <FilterBar hasActiveFilters={hasActiveFilters} onClear={resetFilters}>
         <div className="relative md:w-80">
           <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="按任务名过滤" className="pl-9" />
+          <Input
+            value={filters.q}
+            onChange={(event) => setFilter("q", event.target.value)}
+            placeholder="按任务名过滤"
+            className="pl-9"
+          />
         </div>
         <Select
-          value={String(enabledFilter)}
-          onValueChange={(value) => setEnabledFilter(value === "" ? "" : value === "true")}
+          value={filters.enabled}
+          onValueChange={(value) => setFilter("enabled", value as "true" | "false" | "")}
           options={[
             { value: "", label: "全部状态" },
             { value: "true", label: "启用" },
@@ -254,7 +289,12 @@ export function TasksPage(): JSX.Element {
         onDelete={handleDelete}
       />
 
-      <PaginationBar page={query.data?.page ?? page} pageSize={query.data?.page_size} total={query.data?.total} onChange={setPage} />
+      <PaginationBar
+        page={query.data?.page ?? page}
+        pageSize={query.data?.page_size}
+        total={query.data?.total}
+        onChange={setPage}
+      />
 
       <TaskDialog
         open={open}
@@ -285,14 +325,4 @@ export function TasksPage(): JSX.Element {
       />
     </div>
   );
-}
-
-/**
- * 返回任务操作成功提示。
- */
-function taskActionSuccessTitle(action: TaskAction, enabled?: boolean): string {
-  if (action === "run") return "已触发运行";
-  if (action === "cancel") return "已发送取消请求";
-  if (action === "toggle") return enabled ? "任务已启用" : "任务已停用";
-  return "任务已删除";
 }

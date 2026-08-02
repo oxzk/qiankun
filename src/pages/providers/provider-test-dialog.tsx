@@ -1,11 +1,18 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Field } from "@/components/common";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { formatJson, parseJsonObject } from "@/lib/json-schema";
 import type { JsonRecord, ProviderInfo } from "@/types";
-import { formatJson, parseJsonObject } from "./provider-utils";
 
 export interface ProviderTestDialogProps {
   /**
@@ -75,25 +82,30 @@ export function ProviderTestDialog({
         <DialogHeader>
           <DialogTitle>测试运行 {provider?.name ?? ""}</DialogTitle>
         </DialogHeader>
-        <form className="space-y-4" onSubmit={submit}>
-          <Field label="配置参数 (JSON)">
-            <Textarea
-              value={configText}
-              onChange={(event) => setConfigText(event.target.value)}
-              placeholder={`例如:\n{\n  "message": "hello"\n}`}
-              rows={10}
-              className="font-mono text-xs"
-            />
-          </Field>
+        <form
+          onSubmit={submit}
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        >
+          <DialogBody className="space-y-4">
+            <Field label="配置参数 (JSON)">
+              <Textarea
+                value={configText}
+                onChange={(event) => setConfigText(event.target.value)}
+                placeholder={`例如:\n{\n  "message": "hello"\n}`}
+                rows={10}
+                className="font-mono text-xs"
+              />
+            </Field>
+          </DialogBody>
 
-          <div className="flex justify-end gap-2">
+          <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               取消
             </Button>
             <Button type="submit" loading={loading} disabled={!provider}>
               运行测试
             </Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

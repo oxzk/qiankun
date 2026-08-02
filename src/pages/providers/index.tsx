@@ -1,10 +1,10 @@
 import { useCallback, useState } from "react";
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw } from "lucide-react";
-import { EmptyState, SectionHeader } from "@/components/common";
-import { PaginationBar } from "@/components/pagination-bar";
+import { EmptyState, PaginationBar, SectionHeader } from "@/components/common";
 import { Button } from "@/components/ui/button";
-import { usePagination } from "@/hooks/use-pagination";
+import { useTableParams } from "@/hooks/use-table-params";
+import { useToast } from "@/hooks/use-toast";
 import { useToastMutation } from "@/hooks/use-toast-mutation";
 import { getErrorMessage, providersApi } from "@/lib/api";
 import { queryStaleTime } from "@/lib/query-options";
@@ -40,11 +40,14 @@ interface ProviderTestRunVariables {
  * 执行器管理页面。
  */
 export function ProvidersPage(): JSX.Element {
-  const { page, setPage } = usePagination();
+  const { page, setPage } = useTableParams({
+    defaultFilters: {},
+  });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<ProviderInfo | null>(null);
   const [testingProvider, setTestingProvider] = useState<ProviderInfo | null>(null);
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const query = useQuery({
     queryKey: queryKeys.providers.list({ page }),
@@ -66,11 +69,44 @@ export function ProvidersPage(): JSX.Element {
     },
   });
 
-  const toggleMutation = useToastMutation<ProviderInfo, ProviderToggleVariables>({
-    mutationFn: ({ name, enabled }) => (enabled ? providersApi.enable(name) : providersApi.disable(name)),
-    successTitle: "执行器状态已更新",
-    errorTitle: "操作失败",
-    invalidate: [queryKeys.providers.root, queryKeys.providers.options, queryKeys.tasks.root],
+  // 开关启停操作的乐观更新
+  const toggleMutation = useMutation({
+    mutationFn: ({ name, enabled }: ProviderToggleVariables) =>
+      enabled ? providersApi.enable(name) : providersApi.disable(name),
+    onMutate: async ({ name, enabled }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.providers.root });
+      const previousQueries = queryClient.getQueriesData({ queryKey: queryKeys.providers.root });
+
+      queryClient.setQueriesData({ queryKey: queryKeys.providers.root }, (old: unknown) => {
+        if (!old || typeof old !== "object" || !("items" in old) || !Array.isArray((old as { items: ProviderInfo[] }).items)) {
+          return old;
+        }
+        return {
+          ...old,
+          items: (old as { items: ProviderInfo[] }).items.map((item) =>
+            item.name === name ? { ...item, enabled } : item,
+          ),
+        };
+      });
+
+      return { previousQueries };
+    },
+    onError: (err, _, context) => {
+      if (context?.previousQueries) {
+        context.previousQueries.forEach(([key, data]) => {
+          queryClient.setQueryData(key, data);
+        });
+      }
+      toast({ title: "操作失败", description: getErrorMessage(err), variant: "destructive" });
+    },
+    onSuccess: (_, variables) => {
+      toast({ title: variables.enabled ? "执行器已启用" : "执行器已停用" });
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.providers.root });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.providers.options });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.root });
+    },
   });
 
   const syncMutation = useToastMutation<boolean, void>({
