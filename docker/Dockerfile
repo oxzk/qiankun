@@ -17,7 +17,8 @@ ARG WEBSOCKIFY_VERSION=0.13.0
 
 WORKDIR /workspace
 
-ENV DISPLAY=:99 \
+ENV XVFB_DISPLAY=:99 \
+    DISPLAY=:99 \
     VIRTUAL_ENV=/workspace/.venv \
     PATH="/workspace/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \

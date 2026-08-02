@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal, Pattern, Protocol
 from urllib.parse import unquote, urlparse
@@ -193,8 +195,19 @@ class BaseCamoufox(BrowserDriver):
         camoufox_class = self._load_camoufox_class()
         extra_launch, extra_context = self._split_launch_and_context(dict(launch_options))
 
+        # Camoufox virtual 会改写传入 env 的 DISPLAY, 必须隔离进程级环境.
+        launch_env: dict[str, str] = dict(os.environ)
+        custom_env = extra_launch.pop("env", None)
+        if custom_env is not None:
+            if not isinstance(custom_env, Mapping):
+                raise AppError("Camoufox env 必须是键值映射")
+            launch_env.update(
+                {str(key): str(value) for key, value in custom_env.items()}
+            )
+
         merged_launch_options: dict[str, object] = {
             "headless": headless,
+            "env": launch_env,
             # humanize 会把 mouse.move 拖到数十秒, 默认关闭.
             # "humanize": False,
         }

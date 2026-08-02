@@ -108,6 +108,10 @@ class BaseBrowserProvider(DomActionsMixin, BaseProvider):
         self.log(f"{message}: {exc}")
         data: dict[str, object] = {"error": str(exc)}
         try:
+            browser.latest_page()
+        except Exception:
+            return ProviderResult.fail(message=message, data=data)
+        try:
             data["title"] = await browser.title()
             self.log(f"失败页标题: {data['title']}", log_type="system")
         except Exception:

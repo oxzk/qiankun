@@ -69,6 +69,33 @@ wait_for_port() {
     return 1
 }
 
+# 等待 Xvfb 创建显示 socket, 防止浏览器在图形服务就绪前启动.
+wait_for_x_server() {
+    local display="$1"
+    local xvfb_pid="$2"
+    local timeout="${3:-15}"
+    local display_number="${display#:}"
+    local socket="/tmp/.X11-unix/X${display_number}"
+    local attempts=$((timeout * 5))
+
+    for ((attempt = 1; attempt <= attempts; attempt++)); do
+        if ! kill -0 "${xvfb_pid}" >/dev/null 2>&1; then
+            log "错误: Xvfb 已退出, 详细信息见 /tmp/xvfb.log"
+            return 1
+        fi
+
+        if [[ -S "${socket}" ]]; then
+            log "Xvfb 已就绪: ${display}"
+            return 0
+        fi
+
+        sleep 0.2
+    done
+
+    log "错误: Xvfb 未在 ${timeout} 秒内创建 ${socket}"
+    return 1
+}
+
 # 从 cloudflared 日志解析 quick tunnel 访问地址.
 wait_for_cloudflared_url() {
     local log_file="$1"
@@ -95,8 +122,9 @@ wait_for_cloudflared_url() {
     return 1
 }
 
-# 配置基础环境.
-export DISPLAY="${DISPLAY:-:99}"
+# 配置基础环境. false 固定使用容器级 Xvfb, virtual 由 Camoufox 单独分配显示.
+export XVFB_DISPLAY="${XVFB_DISPLAY:-:99}"
+export DISPLAY="${XVFB_DISPLAY}"
 export XVFB_WHD="${XVFB_WHD:-1920x1080x24}"
 export VNC_PORT="${VNC_PORT:-5900}"
 export NOVNC_PORT="${NOVNC_PORT:-15902}"
@@ -114,7 +142,8 @@ dbus-daemon --session --fork --address="${DBUS_SESSION_BUS_ADDRESS}" --print-add
 
 start_background "Xvfb: ${DISPLAY} (${XVFB_WHD})" /tmp/xvfb.log \
     Xvfb "${DISPLAY}" -screen 0 "${XVFB_WHD}" -ac -nolisten tcp +extension GLX +extension RANDR +render -noreset
-sleep 1
+XVFB_PID="${BACKGROUND_PIDS[-1]}"
+wait_for_x_server "${DISPLAY}" "${XVFB_PID}"
 
 start_background "Fluxbox" /tmp/fluxbox.log fluxbox
 sleep 1

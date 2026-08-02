@@ -63,7 +63,6 @@ class ZeroProvider(BaseBrowserProvider):
     CHECKIN_URL: ClassVar[str] = "https://api.saviour.cc.cd/daily-checkin"
     EMAIL_SELECTOR: ClassVar[str] = "input[type='email']"
     AGREE_CONTINUE_SELECTOR: ClassVar[str] = "button:has-text('同意并继续')"
-    AGREEMENT_SELECTOR: ClassVar[str] = "#login-agreement-consent"
     PASSWORD_SELECTOR: ClassVar[str] = "input[type='password']"
     LOGIN_SUBMIT_SELECTOR: ClassVar[str] = "form button[type='submit']"
     SPIN_BUTTON_SELECTOR: ClassVar[str] = "button.spin-button"
