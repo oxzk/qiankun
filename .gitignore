@@ -17,8 +17,8 @@ build/
 dist/
 
 # Frontend dependencies & output
-src/node_modules/
-src/dist/
+web/src/node_modules/
+web/src/dist/
 *.tsbuildinfo
 public/index.html
 public/assets/

@@ -2,11 +2,11 @@ FROM node:22-slim AS frontend-builder
 
 WORKDIR /build
 
-COPY src/package.json src/package-lock.json ./
+COPY web/src/package.json web/src/package-lock.json ./
 RUN npm ci
 
 COPY public /public
-COPY src ./
+COPY web/src ./
 RUN npm run build
 RUN test -f /build/dist/index.html
 

@@ -19,8 +19,8 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
-src/node_modules/
-src/dist/
-src/tsconfig.*.tsbuildinfo
+web/src/node_modules/
+web/src/dist/
+web/src/tsconfig.*.tsbuildinfo
 /public/index.html
 /public/assets/

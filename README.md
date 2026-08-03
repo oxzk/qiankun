@@ -92,7 +92,7 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 安装前端依赖:
 
 ```bash
-cd src
+cd web/src
 npm install
 ```
 
@@ -108,7 +108,7 @@ npm run dev
 npm run build
 ```
 
-构建产物默认输出到 `src/dist`. 部署时拷贝到根目录 `public`, 后端会在存在 `public/index.html` 时自动挂载前端页面.
+构建产物默认输出到 `web/src/dist`. 部署时拷贝到根目录 `public`, 后端会在存在 `public/index.html` 时自动挂载前端页面.
 
 ## CLI
 
@@ -178,6 +178,6 @@ uv run python -m compileall app
 前端构建检查:
 
 ```bash
-cd src
+cd web/src
 npm run build
 ```
