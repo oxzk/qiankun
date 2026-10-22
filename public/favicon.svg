@@ -1,0 +1,108 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>QianKun Bagua Favicon</title>
+  <defs>
+    <!-- Dark Slate/Black App Icon Background -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+
+    <!-- Electric Cyan Gradient -->
+    <linearGradient id="cyanGrad" x1="22" y1="22" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#0EA5E9"/>
+    </linearGradient>
+
+    <!-- Neon Glow Filter -->
+    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background App-Icon Rect -->
+  <rect width="64" height="64" rx="16" fill="url(#bgGrad)" stroke="#1E293B" stroke-width="1.2"/>
+
+  <!-- Outer Ring (Subtle Circle) -->
+  <circle cx="32" cy="32" r="29" stroke="#334155" stroke-width="1" stroke-dasharray="2.5 2" opacity="0.4"/>
+  <circle cx="32" cy="32" r="26" stroke="#334155" stroke-width="1" opacity="0.6"/>
+
+  <!-- Swirling Yin-Yang Center (Taiji) -->
+  <g filter="url(#neonGlow)">
+    <!-- Cyan Swirl (Yang) -->
+    <path d="M 32 18 A 7 7 0 0 0 32 32 A 7 7 0 0 1 32 46 A 14 14 0 0 1 32 18 Z" fill="url(#cyanGrad)"/>
+    <!-- White Swirl (Yin) -->
+    <path d="M 32 46 A 7 7 0 0 0 32 32 A 7 7 0 0 1 32 18 A 14 14 0 0 1 32 46 Z" fill="#FFFFFF"/>
+    <!-- Swirl Dots -->
+    <circle cx="32" cy="25" r="1.6" fill="#FFFFFF"/>
+    <circle cx="32" cy="39" r="1.6" fill="url(#cyanGrad)"/>
+  </g>
+
+  <!-- 8 Trigrams (Earlier Heaven Bagua - 先天八卦) -->
+  <g stroke="#FFFFFF" stroke-width="1.3" stroke-linecap="round">
+    
+    <!-- 1. Top (0°): 乾 Qian (☰) -->
+    <g transform="translate(32, 32) rotate(0) translate(0, -22)">
+      <line x1="-3" y1="-1" x2="3" y2="-1" />
+      <line x1="-3" y1="0" x2="3" y2="0" />
+      <line x1="-3" y1="1" x2="3" y2="1" />
+    </g>
+
+    <!-- 2. Top-Right (45°): 巽 Xun (☴) -->
+    <g transform="translate(32, 32) rotate(45) translate(0, -22)">
+      <line x1="-3" y1="-1" x2="3" y2="-1" />
+      <line x1="-3" y1="0" x2="3" y2="0" />
+      <line x1="-3" y1="1" x2="-0.6" y2="1" /><line x1="0.6" y1="1" x2="3" y2="1" />
+    </g>
+
+    <!-- 3. Right (90°): 坎 Kan (☵) -->
+    <g transform="translate(32, 32) rotate(90) translate(0, -22)">
+      <line x1="-3" y1="-1" x2="-0.6" y2="-1" /><line x1="0.6" y1="-1" x2="3" y2="-1" />
+      <line x1="-3" y1="0" x2="3" y2="0" />
+      <line x1="-3" y1="1" x2="-0.6" y2="1" /><line x1="0.6" y1="1" x2="3" y2="1" />
+    </g>
+
+    <!-- 4. Bottom-Right (135°): 艮 Gen (☶) -->
+    <g transform="translate(32, 32) rotate(135) translate(0, -22)">
+      <line x1="-3" y1="-1" x2="3" y2="-1" />
+      <line x1="-3" y1="0" x2="-0.6" y2="0" /><line x1="0.6" y1="0" x2="3" y2="0" />
+      <line x1="-3" y1="1" x2="-0.6" y2="1" /><line x1="0.6" y1="1" x2="3" y2="1" />
+    </g>
+
+    <!-- 5. Bottom (180°): 坤 Kun (☷) -->
+    <g transform="translate(32, 32) rotate(180) translate(0, -22)">
+      <line x1="-3" y1="-1" x2="-0.6" y2="-1" /><line x1="0.6" y1="-1" x2="3" y2="-1" />
+      <line x1="-3" y1="0" x2="-0.6" y2="0" /><line x1="0.6" y1="0" x2="3" y2="0" />
+      <line x1="-3" y1="1" x2="-0.6" y2="1" /><line x1="0.6" y1="1" x2="3" y2="1" />
+    </g>
+
+    <!-- 6. Bottom-Left (225°): 震 Zhen (☳) -->
+    <g transform="translate(32, 32) rotate(225) translate(0, -22)">
+      <line x1="-3" y1="-1" x2="-0.6" y2="-1" /><line x1="0.6" y1="-1" x2="3" y2="-1" />
+      <line x1="-3" y1="0" x2="-0.6" y2="0" /><line x1="0.6" y1="0" x2="3" y2="0" />
+      <line x1="-3" y1="1" x2="3" y2="1" />
+    </g>
+
+    <!-- 7. Left (270°): 离 Li (☲) -->
+    <g transform="translate(32, 32) rotate(270) translate(0, -22)">
+      <line x1="-3" y1="-1" x2="3" y2="-1" />
+      <line x1="-3" y1="0" x2="-0.6" y2="0" /><line x1="0.6" y1="0" x2="3" y2="0" />
+      <line x1="-3" y1="1" x2="3" y2="1" />
+    </g>
+
+    <!-- 8. Top-Left (315°): 兑 Dui (☱) -->
+    <g transform="translate(32, 32) rotate(315) translate(0, -22)">
+      <line x1="-3" y1="-1" x2="-0.6" y2="-1" /><line x1="0.6" y1="-1" x2="3" y2="-1" />
+      <line x1="-3" y1="0" x2="3" y2="0" />
+      <line x1="-3" y1="1" x2="3" y2="1" />
+    </g>
+    
+  </g>
+
+  <!-- Constellation Dots -->
+  <circle cx="59" cy="32" r="1.2" fill="#3B82F6" opacity="0.8"/>
+  <circle cx="5" cy="32" r="1.2" fill="#FFFFFF" opacity="0.8"/>
+</svg>

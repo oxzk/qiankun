@@ -1,0 +1,596 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 20% 97%;
+    --foreground: 220 10% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 10% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 10% 12%;
+    --primary: 211 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 94%;
+    --secondary-foreground: 220 10% 12%;
+    --muted: 220 14% 94%;
+    --muted-foreground: 220 8% 45%;
+    --accent: 211 100% 96%;
+    --accent-foreground: 211 100% 35%;
+    --destructive: 4 100% 59%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 88%;
+    --input: 220 13% 88%;
+    --ring: 211 100% 50%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 220 14% 8%;
+    --foreground: 220 10% 96%;
+    --card: 220 14% 12%;
+    --card-foreground: 220 10% 96%;
+    --popover: 220 14% 12%;
+    --popover-foreground: 220 10% 96%;
+    --primary: 211 100% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 222 14% 18%;
+    --secondary-foreground: 220 10% 96%;
+    --muted: 220 14% 16%;
+    --muted-foreground: 220 8% 62%;
+    --accent: 211 70% 22%;
+    --accent-foreground: 211 100% 80%;
+    --destructive: 4 90% 62%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 14% 22%;
+    --input: 220 14% 22%;
+    --ring: 211 100% 60%;
+  }
+
+  * {
+    @apply border-border;
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 0.75rem;
+    height: 0.75rem;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    border: 0.25rem solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+    background-color: hsl(var(--muted-foreground) / 0.35);
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.55);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(60rem 40rem at 10% -10%, hsl(211 100% 60% / 0.08), transparent 60%),
+      radial-gradient(50rem 30rem at 110% 0%, hsl(280 90% 60% / 0.06), transparent 60%),
+      radial-gradient(40rem 30rem at 50% 110%, hsl(180 80% 50% / 0.05), transparent 60%);
+  }
+
+  .dark body::before {
+    background:
+      radial-gradient(60rem 40rem at 10% -10%, hsl(211 100% 50% / 0.16), transparent 60%),
+      radial-gradient(50rem 30rem at 110% 0%, hsl(280 90% 55% / 0.12), transparent 60%),
+      radial-gradient(40rem 30rem at 50% 110%, hsl(180 80% 50% / 0.08), transparent 60%);
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-background/75 backdrop-blur-xl backdrop-saturate-150;
+    box-shadow: inset 0 -1px 0 0 hsl(var(--border) / 0.65);
+  }
+
+  .glass-card {
+    @apply border border-border/60 bg-card/85 backdrop-blur-2xl backdrop-saturate-150;
+  }
+
+  .shadow-apple {
+    box-shadow: 0 1px 2px hsl(220 10% 10% / 0.05), 0 8px 24px -12px hsl(220 10% 10% / 0.12);
+  }
+
+  .field-label {
+    @apply text-xs font-medium text-muted-foreground;
+  }
+
+  .code-block {
+    @apply max-h-96 max-w-full whitespace-pre-wrap break-words overflow-x-hidden overflow-y-auto rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed;
+    overflow-wrap: anywhere;
+  }
+
+  .scroll-area-native {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
+  }
+
+  .scroll-area-native::-webkit-scrollbar {
+    width: 0.75rem;
+    height: 0.75rem;
+  }
+
+  .scroll-area-native::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scroll-area-native::-webkit-scrollbar-thumb {
+    border: 0.25rem solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+    background-color: hsl(var(--muted-foreground) / 0.35);
+  }
+
+  .scroll-area-native::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.55);
+  }
+
+  .scroll-area-native::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  .table-shell {
+    @apply overflow-hidden rounded-lg border bg-card/80;
+  }
+
+  .data-table {
+    @apply w-full text-left text-sm;
+  }
+
+  .data-table th {
+    @apply bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground;
+  }
+
+  .data-table td {
+    @apply border-t px-3 py-2 align-middle;
+  }
+}
+
+/* Login apple: 左右风格反差, 左暗右亮, 不复用业务区组件样式体系 */
+@layer components {
+  .login-apple {
+    --ap-fg: #1d1d1f;
+    --ap-muted: #6e6e73;
+    --ap-line: rgba(0, 0, 0, 0.1);
+    --ap-fill: #ffffff;
+    --ap-input: #fbfbfd;
+    --ap-blue: #0071e3;
+    --ap-blue-hover: #0077ed;
+    --ap-blue-active: #006edb;
+    --ap-brand-bg: #0b0b0f;
+    --ap-brand-fg: #f5f5f7;
+    --ap-brand-muted: rgba(245, 245, 247, 0.62);
+    --ap-brand-line: rgba(255, 255, 255, 0.12);
+    display: grid;
+    grid-template-columns: 1fr;
+    min-height: 100vh;
+    min-height: 100dvh;
+    color: var(--ap-fg);
+    background: var(--ap-fill);
+    font-family:
+      -apple-system,
+      BlinkMacSystemFont,
+      "SF Pro Text",
+      "SF Pro Display",
+      "PingFang SC",
+      "Hiragino Sans GB",
+      "Helvetica Neue",
+      "Microsoft YaHei",
+      system-ui,
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 左侧: 深色沉浸品牌区 */
+  .login-apple__brand {
+    position: relative;
+    display: none;
+    overflow: hidden;
+    align-items: center;
+    justify-content: center;
+    padding: 3.5rem;
+    color: var(--ap-brand-fg);
+    background:
+      linear-gradient(160deg, rgba(255, 255, 255, 0.04), transparent 42%),
+      radial-gradient(ellipse 80% 60% at 20% 20%, rgba(10, 132, 255, 0.22), transparent 55%),
+      radial-gradient(ellipse 70% 50% at 85% 80%, rgba(175, 82, 222, 0.16), transparent 50%),
+      var(--ap-brand-bg);
+  }
+
+  .login-apple__brand-glow {
+    position: absolute;
+    inset: auto -10% -20% auto;
+    width: 22rem;
+    height: 22rem;
+    border-radius: 9999px;
+    background: radial-gradient(circle, rgba(10, 132, 255, 0.25), transparent 68%);
+    filter: blur(8px);
+    pointer-events: none;
+  }
+
+  .login-apple__brand-inner {
+    position: relative;
+    z-index: 1;
+    max-width: 24rem;
+  }
+
+  .login-apple__brand-kicker {
+    margin: 0 0 1.1rem;
+    color: rgba(10, 132, 255, 0.95);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  .login-apple__brand-title {
+    margin: 0;
+    font-size: clamp(2.6rem, 4.5vw, 3.6rem);
+    font-weight: 650;
+    letter-spacing: -0.04em;
+    line-height: 1.02;
+  }
+
+  .login-apple__brand-title span {
+    display: block;
+    margin-top: 0.25rem;
+    color: var(--ap-brand-muted);
+    font-size: 0.48em;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+
+  .login-apple__brand-desc {
+    margin: 1.25rem 0 0;
+    color: var(--ap-brand-muted);
+    font-size: 1.05rem;
+    line-height: 1.55;
+    letter-spacing: -0.015em;
+  }
+
+  .login-apple__brand-points {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    margin: 2rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .login-apple__brand-points li {
+    padding: 0.4rem 0.75rem;
+    border: 1px solid var(--ap-brand-line);
+    border-radius: 980px;
+    color: rgba(245, 245, 247, 0.88);
+    background: rgba(255, 255, 255, 0.04);
+    font-size: 0.8rem;
+    letter-spacing: -0.01em;
+  }
+
+  /* 右侧: 浅色极简表单区 */
+  .login-apple__auth {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2.5rem 1.25rem;
+    background: var(--ap-fill);
+  }
+
+  .login-apple__auth-inner {
+    width: 100%;
+    max-width: 21rem;
+  }
+
+  .login-apple__header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 2.1rem;
+    text-align: center;
+  }
+
+  .login-apple__mark {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 5.5rem;
+    height: 5.5rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .login-apple__mark-glow {
+    position: absolute;
+    inset: 8% 4% auto;
+    height: 70%;
+    border-radius: 9999px;
+    background: radial-gradient(circle, rgba(0, 113, 227, 0.22), transparent 70%);
+    filter: blur(10px);
+    transform: translateY(55%);
+    pointer-events: none;
+  }
+
+  .login-apple__mark-icon {
+    position: relative;
+    z-index: 1;
+    width: 4.5rem;
+    height: 4.5rem;
+    overflow: hidden;
+    border-radius: 1.15rem;
+    background: #0b1220;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.18) inset,
+      0 2px 4px rgba(0, 0, 0, 0.08),
+      0 18px 36px rgba(15, 23, 42, 0.22);
+  }
+
+  .login-apple__logo {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .login-apple__heading {
+    display: grid;
+    justify-items: center;
+    gap: 0.85rem;
+  }
+
+  .login-apple__title {
+    margin: 0;
+    font-size: 1.7rem;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+  }
+
+  .login-apple__rule {
+    width: 2.25rem;
+    height: 2px;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.18), transparent);
+  }
+
+  .login-apple__desc {
+    margin: 0.4rem 0 0;
+    color: var(--ap-muted);
+    font-size: 0.95rem;
+    line-height: 1.4;
+    letter-spacing: -0.01em;
+  }
+
+  .login-apple__form {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .login-apple__field {
+    display: grid;
+    gap: 0.4rem;
+  }
+
+  .login-apple__label {
+    padding-left: 0.1rem;
+    color: var(--ap-muted);
+    font-size: 0.8rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  .login-apple__input {
+    width: 100%;
+    height: 2.85rem;
+    padding: 0 0.95rem;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 0.75rem;
+    color: var(--ap-fg);
+    background: var(--ap-input);
+    outline: none;
+    font-family: inherit;
+    font-size: 1rem;
+    letter-spacing: -0.01em;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease,
+      background-color 0.15s ease;
+  }
+
+  .login-apple__input:hover:not(:disabled) {
+    border-color: rgba(0, 0, 0, 0.2);
+  }
+
+  .login-apple__input:focus {
+    border-color: rgba(0, 113, 227, 0.55);
+    box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.16);
+    background: #fff;
+  }
+
+  .login-apple__input:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    background: #f5f5f7;
+  }
+
+  .login-apple__password {
+    position: relative;
+  }
+
+  .login-apple__input--password {
+    padding-right: 2.7rem;
+  }
+
+  .login-apple__eye {
+    position: absolute;
+    top: 50%;
+    right: 0.35rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.1rem;
+    height: 2.1rem;
+    border: 0;
+    border-radius: 0.55rem;
+    color: var(--ap-muted);
+    background: transparent;
+    transform: translateY(-50%);
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+
+  .login-apple__eye:hover:not(:disabled) {
+    color: var(--ap-fg);
+    background: rgba(0, 0, 0, 0.04);
+  }
+
+  .login-apple__eye:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .login-apple__submit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 2.85rem;
+    margin-top: 0.35rem;
+    border: 0;
+    border-radius: 980px;
+    color: #fff;
+    background: var(--ap-blue);
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    cursor: pointer;
+    transition: background-color 0.15s ease, transform 0.12s ease, opacity 0.15s ease;
+  }
+
+  .login-apple__submit:hover:not(:disabled) {
+    background: var(--ap-blue-hover);
+  }
+
+  .login-apple__submit:active:not(:disabled) {
+    background: var(--ap-blue-active);
+    transform: scale(0.99);
+  }
+
+  .login-apple__submit:disabled {
+    opacity: 0.55;
+    cursor: wait;
+  }
+
+  @media (min-width: 900px) {
+    .login-apple {
+      grid-template-columns: minmax(0, 1.08fr) minmax(24rem, 0.92fr);
+    }
+
+    .login-apple__brand {
+      display: flex;
+    }
+
+    .login-apple__auth {
+      padding: 3.5rem 4.5rem;
+      box-shadow: -24px 0 60px rgba(0, 0, 0, 0.08);
+    }
+  }
+
+  /* 系统深色时保持左右反差: 左更深, 右中灰面板 */
+  @media (prefers-color-scheme: dark) {
+    .login-apple {
+      --ap-fg: #f5f5f7;
+      --ap-muted: #a1a1a6;
+      --ap-line: rgba(255, 255, 255, 0.1);
+      --ap-fill: #1c1c1e;
+      --ap-input: #2c2c2e;
+      --ap-blue: #0a84ff;
+      --ap-blue-hover: #409cff;
+      --ap-blue-active: #0077ed;
+      --ap-brand-bg: #000000;
+      --ap-brand-fg: #f5f5f7;
+      --ap-brand-muted: rgba(245, 245, 247, 0.58);
+      --ap-brand-line: rgba(255, 255, 255, 0.14);
+    }
+
+    .login-apple__brand {
+      background:
+        linear-gradient(160deg, rgba(255, 255, 255, 0.03), transparent 42%),
+        radial-gradient(ellipse 80% 60% at 20% 20%, rgba(10, 132, 255, 0.28), transparent 55%),
+        radial-gradient(ellipse 70% 50% at 85% 80%, rgba(191, 90, 242, 0.18), transparent 50%),
+        var(--ap-brand-bg);
+    }
+
+    .login-apple__auth {
+      box-shadow: -24px 0 60px rgba(0, 0, 0, 0.35);
+    }
+
+    .login-apple__mark-glow {
+      background: radial-gradient(circle, rgba(10, 132, 255, 0.28), transparent 70%);
+    }
+
+    .login-apple__mark-icon {
+      box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.12) inset,
+        0 2px 4px rgba(0, 0, 0, 0.35),
+        0 20px 40px rgba(0, 0, 0, 0.45);
+    }
+
+    .login-apple__rule {
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.28), transparent);
+    }
+
+    .login-apple__input {
+      border-color: rgba(255, 255, 255, 0.14);
+    }
+
+    .login-apple__input:hover:not(:disabled) {
+      border-color: rgba(255, 255, 255, 0.24);
+    }
+
+    .login-apple__input:focus {
+      border-color: rgba(10, 132, 255, 0.7);
+      box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.22);
+      background: #2c2c2e;
+    }
+
+    .login-apple__input:disabled {
+      background: rgba(44, 44, 46, 0.55);
+    }
+
+    .login-apple__eye:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.08);
+    }
+  }
+}

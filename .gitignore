@@ -1,0 +1,32 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+data/
+
+# Environments
+.env
+.venv
+venv/
+
+# Build & distribution
+build/
+dist/
+
+# Frontend dependencies & output
+web/src/node_modules/
+web/src/dist/
+*.tsbuildinfo
+public/index.html
+public/assets/
+*.egg-info
+
+# Editor & System files
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
