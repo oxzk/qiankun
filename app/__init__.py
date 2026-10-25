@@ -1,0 +1,1 @@
+"""Zero-dependency shared utilities."""
